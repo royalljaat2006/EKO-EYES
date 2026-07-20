@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import SummaryChart from "./components/SummaryChart";
 import DataTable from "./components/DataTable";
@@ -9,6 +9,9 @@ import AllCspsTable from "./components/AllCspsTable";
 import TriggerRunButton from "./components/TriggerRunButton";
 import TestDeliveryPanel from "./components/TestDeliveryPanel";
 import FilterMenu from "./components/FilterMenu";
+import EntityResultsPanel from "./components/EntityResultsPanel";
+import type { EntityCriteria } from "./components/EntityFilterBar";
+import UniversalSearchBar from "./components/UniversalSearchBar";
 import LiveClock from "./components/LiveClock";
 import { useTheme } from "./useTheme";
 import {
@@ -30,6 +33,15 @@ export default function App() {
   const [roster, setRoster] = useState<CspRoster | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [entityCriteria, setEntityCriteria] = useState<EntityCriteria | null>(null);
+  const entityResultsRef = useRef<HTMLDivElement>(null);
+
+  // The LHO/RM/DC results render inline on the page, not in a popup — scroll
+  // them into view on apply so picking a filter from the menu (which can be
+  // well above this section) still feels immediate.
+  useEffect(() => {
+    if (entityCriteria) entityResultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [entityCriteria]);
 
   const load = useCallback(async (r: RangeFilter) => {
     setLoading(true);
@@ -97,7 +109,13 @@ export default function App() {
   return (
     <div className="app-shell">
       <div className="top-actions">
-        <FilterMenu range={range} onRangeChange={setRange} records={roster?.records ?? []} />
+        <FilterMenu
+          range={range}
+          onRangeChange={setRange}
+          records={roster?.records ?? []}
+          onApplyEntity={setEntityCriteria}
+          onClearEntity={() => setEntityCriteria(null)}
+        />
         <TriggerRunButton onComplete={refreshAll} />
       </div>
       <header className="app-header">
@@ -115,6 +133,8 @@ export default function App() {
           <ThemeSwitcher theme={theme} onChange={setTheme} />
         </div>
       </header>
+
+      <UniversalSearchBar records={roster?.records ?? []} />
 
       {error && <div className="error-banner">{error}</div>}
 
@@ -151,6 +171,16 @@ export default function App() {
                 <span className="stat-tile__label">Last refreshed</span>
               </div>
             </div>
+
+            {entityCriteria && roster && (
+              <div ref={entityResultsRef}>
+                <EntityResultsPanel
+                  records={roster.records}
+                  criteria={entityCriteria}
+                  onClear={() => setEntityCriteria(null)}
+                />
+              </div>
+            )}
 
             <SummaryChart data={data.summaryByRm} thresholdLabel={RANGE_FILTER_LABELS[range]} />
             <DataTable records={data.records} thresholdLabel={RANGE_FILTER_LABELS[range]} />

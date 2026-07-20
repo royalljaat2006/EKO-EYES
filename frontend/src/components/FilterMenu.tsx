@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import FilterBar from "./FilterBar";
 import EntityFilterBar from "./EntityFilterBar";
+import type { EntityCriteria } from "./EntityFilterBar";
 import { RANGE_FILTER_LABELS } from "../rangeOptions";
 import type { RangeFilter } from "../rangeOptions";
 import type { InactivityRecord } from "../types";
@@ -10,6 +11,9 @@ interface Props {
   onRangeChange: (value: RangeFilter) => void;
   /** Full roster, for the LHO/RM/DC dropdowns inside the panel. Empty while still loading. */
   records: InactivityRecord[];
+  /** LHO/RM/DC results render inline on the page (EntityResultsPanel), not here — this just forwards the applied selection up. */
+  onApplyEntity: (criteria: EntityCriteria) => void;
+  onClearEntity: () => void;
 }
 
 /**
@@ -20,9 +24,22 @@ interface Props {
  * same onRangeChange callback FilterBar always used; nothing about how
  * filtering works changed, only where the controls live.
  */
-export default function FilterMenu({ range, onRangeChange, records }: Props) {
+export default function FilterMenu({
+  range,
+  onRangeChange,
+  records,
+  onApplyEntity,
+  onClearEntity,
+}: Props) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+
+  // Close the panel once a result is applied — it renders inline on the page
+  // below, so leaving the dropdown open would just sit in the way of it.
+  const applyEntity = (criteria: EntityCriteria) => {
+    onApplyEntity(criteria);
+    setOpen(false);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -61,7 +78,7 @@ export default function FilterMenu({ range, onRangeChange, records }: Props) {
           </div>
           <div className="filter-menu__section">
             <span className="filter-menu__section-label">Browse by LHO / RM / DC</span>
-            <EntityFilterBar records={records} />
+            <EntityFilterBar records={records} onApply={applyEntity} onClear={onClearEntity} />
           </div>
         </div>
       )}
