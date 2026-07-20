@@ -1,0 +1,49 @@
+{
+  "name": "eko-dekho-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Eko Dekho - automated inactivity alert agent: ingestion, notifications, scheduler and dashboard API",
+  "type": "commonjs",
+  "main": "dist/src/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/server.js",
+    "job:run-once": "tsx scripts/runDailyJobOnce.ts",
+    "contacts:template": "tsx scripts/generateContactsTemplate.ts",
+    "test:email": "tsx scripts/testEmail.ts",
+    "test:whatsapp": "tsx scripts/testWhatsApp.ts",
+    "job:run-once:build": "node dist/scripts/runDailyJobOnce.js",
+    "typecheck": "tsc --noEmit",
+    "gmail:auth": "tsx scripts/getGmailRefreshToken.ts",
+    "email:test": "tsx scripts/testEmailSend.ts"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "better-sqlite3": "^11.8.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.5.2",
+    "googleapis": "^144.0.0",
+    "helmet": "^8.0.0",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.16",
+    "pino": "^9.6.0",
+    "pino-http": "^10.4.0",
+    "twilio": "^5.4.3",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.5",
+    "@types/node-cron": "^3.0.11",
+    "@types/nodemailer": "^6.4.17",
+    "pino-pretty": "^13.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

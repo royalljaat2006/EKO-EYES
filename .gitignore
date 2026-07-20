@@ -1,0 +1,28 @@
+# Dependencies / build output (each package has its own too, this covers the root)
+node_modules/
+dist/
+dist-ssr/
+
+# Local Python venv created by the deploy script
+venv_temp/
+
+# Deploy archive artifact
+project.tar.gz
+
+# Real business data (CSP/RM/DC names, mobiles, emails) — stays local only
+backend/data/*.xlsx
+backend/data/*.sqlite
+backend/data/*.sqlite-*
+
+# One-off scripts written during live-server debugging — each has the
+# production SSH/sudo password hardcoded. Never commit these as-is.
+curl_local.py
+inspect_recon_conf.py
+read_claw_snippet.py
+read_inactive_logs.py
+read_nginx_recon.py
+run_deploy.py
+
+# Editor/OS cruft
+.DS_Store
+*.log
