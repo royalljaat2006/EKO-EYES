@@ -1,8 +1,8 @@
 {
-  "name": "eko-dekho-backend",
+  "name": "eyes-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "Eko Dekho - automated inactivity alert agent: ingestion, notifications, scheduler and dashboard API",
+  "description": "E.Y.E.S. (EKO Yield & Escalation System) - ingestion, notifications, scheduler and dashboard API",
   "type": "commonjs",
   "main": "dist/src/server.js",
   "scripts": {

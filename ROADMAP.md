@@ -1,4 +1,4 @@
-# Eko Dekho — Proposed Changes & Add-ons
+# E.Y.E.S. — Proposed Changes & Add-ons
 
 Status: **proposal only — nothing here is implemented.**
 Written 2026-07-15, against the system as it stands today.

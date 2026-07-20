@@ -122,7 +122,8 @@ export default function App() {
         <div className="app-header__brand">
           <img src="eko-logo.svg" alt="Eko" className="app-header__logo" />
           <div>
-            <h1>Eko Dekho</h1>
+            <h1>E.Y.E.S.</h1>
+            <p className="app-header__tagline">EKO Yield &amp; Escalation System</p>
             <p className="app-header__subtitle">
               Live view of the inactivity tracking spreadsheet
             </p>

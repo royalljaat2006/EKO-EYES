@@ -73,7 +73,7 @@ export function buildAlertBody(record: InactivityRecord, role: NotificationRole)
     ``,
     `Please follow up with the target person as soon as possible.`,
     ``,
-    `-- Eko Dekho (Automated Inactivity Alert Agent)`,
+    `-- E.Y.E.S. (EKO Yield & Escalation System)`,
   ].join("\n");
 }
 

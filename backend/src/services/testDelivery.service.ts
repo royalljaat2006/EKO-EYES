@@ -18,12 +18,12 @@ export interface TestDeliveryResult {
 }
 
 const TEST_EMAIL_BODY = [
-  "This is a TEST message from Eko Dekho (the automated inactivity alert agent).",
+  "This is a TEST message from E.Y.E.S. (EKO Yield & Escalation System).",
   "",
   "If you are reading this, email delivery is working end to end.",
   "It does NOT affect any CSP, RM, or DC, and the spreadsheet was not touched.",
   "",
-  "-- Eko Dekho (delivery test)",
+  "-- E.Y.E.S. (delivery test)",
 ].join("\n");
 
 // WhatsApp here goes out through Goinfinito's APPROVED template (CERF_TEMPLATE_ID),

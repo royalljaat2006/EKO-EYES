@@ -192,7 +192,7 @@ export function renderDigestText(target: DigestTarget, decisions: NudgeDecisions
           `terminal: ${p.record.terminalStatus}, RM: ${p.record.rmName || "—"}`,
       );
     }
-    lines.push(``, `-- Eko Dekho (Automated Inactivity Alert Agent)`);
+    lines.push(``, `-- E.Y.E.S. (EKO Yield & Escalation System)`);
     return lines.join("\n");
   }
 
@@ -239,7 +239,7 @@ export function renderDigestText(target: DigestTarget, decisions: NudgeDecisions
   lines.push(
     `Target: keep inactivity at or below ${env.TARGET_INACTIVITY_RATE}%.`,
     ``,
-    `-- Eko Dekho (Automated Inactivity Alert Agent)`,
+    `-- E.Y.E.S. (EKO Yield & Escalation System)`,
   );
   return lines.join("\n");
 }

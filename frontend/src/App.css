@@ -191,16 +191,23 @@
 }
 
 .app-header h1 {
-  margin: 0 0 4px;
+  margin: 0 0 2px;
   font-size: 28px;
   font-weight: 600;
   letter-spacing: -0.4px;
 }
 
+.app-header__tagline {
+  margin: 0 0 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .app-header__subtitle {
   margin: 0;
-  color: var(--text-secondary);
-  font-size: 14px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .filter-bar {

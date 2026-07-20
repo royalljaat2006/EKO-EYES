@@ -1,4 +1,4 @@
-# Eko Dekho — Notification Templates Reference (Categorized)
+# E.Y.E.S. — Notification Templates Reference (Categorized)
 
 This document organizes and categorizes the exact email templates used by the AI Agent to notify CSPs, RMs, DCs, and Joint Escalation targets.
 
@@ -22,7 +22,7 @@ This document organizes and categorizes the exact email templates used by the AI
   * If you are facing any device issues, shop closure, or need support, reply/email HELP and our team will call you.
   * If everything is fine, simply perform a single transaction today to reactivate your terminal.
 
-  -- Eko Dekho (Automated Inactivity Alert Agent)
+  -- E.Y.E.S. (EKO Yield & Escalation System)
   ```
 
 ---
@@ -44,7 +44,7 @@ RMs receive consolidated digests containing all their assigned CSPs who are inac
 
   Target: keep inactivity at or below 2%.
 
-  -- Eko Dekho (Automated Inactivity Alert Agent)
+  -- E.Y.E.S. (EKO Yield & Escalation System)
   ```
 
 ---
@@ -69,7 +69,7 @@ DCs are department-level coordinators. They are looped in for department-wide vi
 
   Target: keep inactivity at or below 2%.
 
-  -- Eko Dekho (Automated Inactivity Alert Agent)
+  -- E.Y.E.S. (EKO Yield & Escalation System)
   ```
 
 ---
