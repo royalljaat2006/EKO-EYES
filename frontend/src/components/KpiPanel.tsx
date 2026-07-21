@@ -149,7 +149,7 @@ export default function KpiPanel({ kpi, range, rangeCounts, filteredCount }: Pro
             <span className="delivery-stat__value delivery-stat__value--good">
               {kpi.recoveries}
             </span>
-            <span className="delivery-stat__label">Recovered (30d)</span>
+            <span className="delivery-stat__label">Activated successfully</span>
           </div>
           <div className="delivery-stat">
             <span className="delivery-stat__value">{kpi.recoveryRate}%</span>
