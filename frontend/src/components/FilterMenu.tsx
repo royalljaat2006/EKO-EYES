@@ -11,7 +11,7 @@ interface Props {
   onRangeChange: (value: RangeFilter) => void;
   /** Full roster, for the LHO/RM/DC dropdowns inside the panel. Empty while still loading. */
   records: InactivityRecord[];
-  /** LHO/RM/DC results render inline on the page (EntityResultsPanel), not here — this just forwards the applied selection up. */
+  /** Applying just forwards the selection up to App.tsx — it combines with the day-range filter and search to determine what the top cards/graph/table show. */
   onApplyEntity: (criteria: EntityCriteria) => void;
   onClearEntity: () => void;
 }

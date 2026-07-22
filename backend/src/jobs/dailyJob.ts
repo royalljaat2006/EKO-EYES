@@ -27,6 +27,7 @@ import {
   saveKpiSnapshot,
   upsertPersonState,
 } from "../services/stateStore.service";
+import { recordInactivityOnset } from "../services/dailyChangeLog.service";
 import { tierForDays } from "../config/escalation";
 import { RANGE_OPTIONS, RangeOption, inRange } from "../config/inactivityRanges";
 import { DailyJobResult } from "../types";
@@ -173,7 +174,20 @@ export async function runDailyInactivityJob(): Promise<DailyJobResult> {
     // The daily-change chart's other half: EVERY first-time entrant, including
     // day-3 self-nudge — i.e. someone who was active yesterday and is flagged
     // today, at any severity. Distinct from newBreaches above.
-    const newlyInactive = evaluated.filter((e) => e.reason === "entered-tier").length;
+    const newlyInactiveToday = evaluated.filter((e) => e.reason === "entered-tier");
+    const newlyInactive = newlyInactiveToday.length;
+    // Named audit trail (dailyChangeLog.service.ts) — WHO specifically went
+    // active -> inactive today, not just the count. Mirrors recordRecovery
+    // above, which already logs the other direction per-person.
+    for (const e of newlyInactiveToday) {
+      recordInactivityOnset(
+        e.record.targetPersonName,
+        e.record.cspCode,
+        e.policy.tier,
+        e.record.days ?? 0,
+        runAt,
+      );
+    }
 
     const rangeCounts: Record<RangeOption, number> = {} as Record<RangeOption, number>;
     for (const opt of RANGE_OPTIONS) {

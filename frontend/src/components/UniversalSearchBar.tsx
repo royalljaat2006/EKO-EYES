@@ -1,12 +1,11 @@
-import { useMemo, useState } from "react";
 import type { InactivityRecord } from "../types";
-import FilteredResultsPanel from "./FilteredResultsPanel";
 
 interface Props {
-  records: InactivityRecord[];
+  value: string;
+  onChange: (value: string) => void;
 }
 
-function matchesQuery(r: InactivityRecord, q: string): boolean {
+export function matchesQuery(r: InactivityRecord, q: string): boolean {
   return (
     r.cspCode.toLowerCase().includes(q) ||
     r.targetPersonName.toLowerCase().includes(q) ||
@@ -24,22 +23,13 @@ function matchesQuery(r: InactivityRecord, q: string): boolean {
 
 /**
  * One search box that reaches across the whole roster — CSP code/name,
- * RM/DC/LHO name, any mobile, any email, terminal status — regardless of
- * which day-range or LHO/RM/DC filter is currently active elsewhere on the
- * page. Results render inline right below the box as they're typed, in the
- * same style as the LHO/RM/DC results (FilteredResultsPanel) — no popup.
+ * RM/DC/LHO name, any mobile, any email, terminal status. Purely an input:
+ * the query lives in App.tsx and combines with the day-range and LHO/RM/DC
+ * filters to determine what the TOP cards/graph show — this component no
+ * longer renders its own results panel, so there's only ever one place on
+ * the page showing "what's currently filtered."
  */
-export default function UniversalSearchBar({ records }: Props) {
-  const [query, setQuery] = useState("");
-  const q = query.trim().toLowerCase();
-
-  const matches = useMemo(() => {
-    if (!q) return [];
-    return records.filter((r) => matchesQuery(r, q)).sort((a, b) => (b.days ?? -1) - (a.days ?? -1));
-  }, [records, q]);
-
-  const clear = () => setQuery("");
-
+export default function UniversalSearchBar({ value, onChange }: Props) {
   return (
     <div className="universal-search">
       <div className="universal-search__bar">
@@ -50,30 +40,21 @@ export default function UniversalSearchBar({ records }: Props) {
           type="search"
           className="universal-search__input"
           placeholder="Search any CSP code, name, RM, DC, LHO, mobile, or email…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
           aria-label="Universal search across all CSPs"
         />
-        {query && (
+        {value && (
           <button
             type="button"
             className="universal-search__clear"
-            onClick={clear}
+            onClick={() => onChange("")}
             aria-label="Clear search"
           >
             &#10005;
           </button>
         )}
       </div>
-
-      {q && (
-        <FilteredResultsPanel
-          title={`Search: "${query.trim()}"`}
-          records={matches}
-          emptyMessage="No CSPs match this search."
-          onClear={clear}
-        />
-      )}
     </div>
   );
 }

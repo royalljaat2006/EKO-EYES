@@ -12,6 +12,7 @@ import { runDailyInactivityJob } from "../jobs/dailyJob";
 import { getKpiReport } from "../services/kpi.service";
 import { fetchRecords } from "../services/dataSource.service";
 import { runTestDelivery } from "../services/testDelivery.service";
+import { getDailyChanges } from "../services/dailyChangeLog.service";
 import logger from "../utils/logger";
 
 const router = Router();
@@ -84,6 +85,33 @@ router.get("/kpi", async (req, res) => {
   } catch (err) {
     logger.error({ err }, "Failed to build KPI report");
     return res.status(502).json({ error: "Failed to fetch data from Google Sheets" });
+  }
+});
+
+const dailyChangesQuerySchema = z.object({
+  day: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "day must be YYYY-MM-DD")
+    .optional(),
+});
+
+/**
+ * GET /api/daily-changes[?day=YYYY-MM-DD]
+ * The named audit trail behind the daily-change numbers: which specific CSPs
+ * went active -> inactive today, and which recovered — not just counts.
+ * Defaults to today. Populated once per real daily-job run (see dailyJob.ts);
+ * a day nothing ran on simply returns empty arrays, not an error.
+ */
+router.get("/daily-changes", (req, res) => {
+  const parsed = dailyChangesQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten().fieldErrors });
+  }
+  try {
+    return res.json(getDailyChanges(parsed.data.day));
+  } catch (err) {
+    logger.error({ err }, "Failed to load daily changes");
+    return res.status(500).json({ error: "Failed to load daily changes" });
   }
 });
 

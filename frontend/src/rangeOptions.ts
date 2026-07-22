@@ -50,3 +50,30 @@ export function inRangeFilter(days: number | null, filter: RangeFilter): boolean
   if (filter === ALL_RANGES) return RANGE_OPTIONS.some((opt) => inRange(days, opt));
   return inRange(days, filter);
 }
+
+/**
+ * Dashboard-display variant: a CSP with NO transaction data (days === null) is
+ * folded into the "90+" bucket instead of being excluded/shown separately —
+ * we don't know their exact count, but "we have never seen a transaction" is
+ * at least as severe as 90 days inactive. Only affects what the dashboard
+ * COUNTS AND DISPLAYS (stat cards, top %, range-strip); it does NOT touch the
+ * real alerting pipeline (backend dailyJob.ts/escalation.service.ts), which
+ * still correctly refuses to guess a day count for these CSPs before nudging
+ * anyone — see SKILLS.md.
+ */
+export function inRangeFilterFolded(days: number | null, filter: RangeFilter): boolean {
+  if (days === null) return filter === ALL_RANGES || filter === "90+";
+  return inRangeFilter(days, filter);
+}
+
+/**
+ * CSPs inactive 90+ days (real or unmeasurable) are dashboard-"ignored": no
+ * one is actively nudging them, so they shouldn't inflate the "Inactive"
+ * headline. They still belong to the roster (Total CSPs), and the 90+ chip
+ * still reveals them on click — this predicate only governs whether "All
+ * Days" folds them into the Inactive count. Display-only, same as
+ * inRangeFilterFolded; does not touch the real alerting pipeline.
+ */
+export function isIgnoredBucket(days: number | null): boolean {
+  return days === null || days >= 90;
+}

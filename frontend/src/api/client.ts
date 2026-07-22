@@ -1,6 +1,7 @@
 import axios from "axios";
 import type {
   CspRoster,
+  DailyChanges,
   DailyJobResult,
   DeliverySummary,
   InactivityQueryResult,
@@ -33,6 +34,12 @@ export async function fetchAllCsps(): Promise<CspRoster> {
 
 export async function fetchKpiReport(range: RangeFilter): Promise<KpiReport> {
   const { data } = await client.get<KpiReport>("/kpi", { params: { range } });
+  return data;
+}
+
+/** The named audit trail: who specifically went active -> inactive today, and who recovered. Defaults to today. */
+export async function fetchDailyChanges(day?: string): Promise<DailyChanges> {
+  const { data } = await client.get<DailyChanges>("/daily-changes", { params: day ? { day } : {} });
   return data;
 }
 

@@ -13,17 +13,32 @@ import {
 import type { TooltipContentProps } from "recharts";
 import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import type { KpiReport } from "../types";
-import { RANGE_OPTIONS, RANGE_LABELS, RANGE_FILTER_LABELS } from "../rangeOptions";
+import { RANGE_OPTIONS, RANGE_LABELS } from "../rangeOptions";
 import type { RangeOption, RangeFilter } from "../rangeOptions";
+import type { Tier } from "../tierOptions";
 
 interface Props {
   kpi: KpiReport;
   /** The header filter's current selection (a bucket, or "all"), so the range strip can highlight it. */
   range: RangeFilter;
-  /** Count per bucket across the full roster, independent of the filter. */
+  /** Count per bucket across the full roster (unmeasurable folded into 90+), independent of the filter. */
   rangeCounts: Record<RangeOption, number> | null;
-  /** How many CSPs match the header filter right now — the same number the table/chart below show. */
+  /** How many CSPs match EVERY active filter (range + LHO/RM/DC + search) right now. */
   filteredCount: number;
+  /** The population the % is measured against — every active filter EXCEPT range (range is what filteredCount narrows within it). */
+  totalCount: number;
+  /** filteredCount / totalCount * 100 — computed once in App.tsx so every consumer agrees. */
+  currentRate: number;
+  onTarget: boolean;
+  /** Describes whatever combination of range/LHO/RM/DC/search is currently active. */
+  filterLabel: string;
+  /** true when LHO/RM/DC or search is active — there's no stored history for that combination, only "today" is knowable. */
+  hasSecondaryFilter: boolean;
+  /** Today's live count for the current combined filter — always accurate even when history isn't available. */
+  liveToday: { day: string; count: number };
+  onRangeChipClick: (opt: RangeOption) => void;
+  onTierChipClick: (tier: Tier) => void;
+  onFilteredCardClick: () => void;
 }
 
 /** "2026-07-20" -> "20 Jul" — a day-of-month label, since the trend spans up to 30 days (a month). */
@@ -35,7 +50,7 @@ function formatDayLabel(day: string): string {
 
 interface MergedTrendDatum {
   day: string;
-  /** CSPs in the selected range that day — undefined for days outside kpi.rangeTrend. */
+  /** CSPs matching the current filter that day — undefined for days we don't have a figure for. */
   count?: number;
   recovered?: number;
   newlyInactive?: number;
@@ -47,8 +62,8 @@ function CombinedTrendTooltip({
   active,
   payload,
   label,
-  rangeLabel,
-}: TooltipContentProps<ValueType, NameType> & { rangeLabel: string }) {
+  filterLabel,
+}: TooltipContentProps<ValueType, NameType> & { filterLabel: string }) {
   if (!active || !payload || payload.length === 0) return null;
   const p = payload[0].payload as MergedTrendDatum;
   return (
@@ -56,7 +71,7 @@ function CombinedTrendTooltip({
       <div className="chart-tooltip__title">{formatDayLabel(label as string)}</div>
       {p.count !== undefined && (
         <div className="chart-tooltip__value">
-          {p.count} CSP{p.count === 1 ? "" : "s"} ({rangeLabel})
+          {p.count} CSP{p.count === 1 ? "" : "s"} ({filterLabel})
         </div>
       )}
       {p.recovered !== undefined && (
@@ -73,30 +88,57 @@ function CombinedTrendTooltip({
   );
 }
 
-export default function KpiPanel({ kpi, range, rangeCounts, filteredCount }: Props) {
-  const gap = Number((kpi.currentRate - kpi.targetRate).toFixed(2));
+export default function KpiPanel({
+  kpi,
+  range,
+  rangeCounts,
+  filteredCount,
+  totalCount,
+  currentRate,
+  onTarget,
+  filterLabel,
+  hasSecondaryFilter,
+  liveToday,
+  onRangeChipClick,
+  onTierChipClick,
+  onFilteredCardClick,
+}: Props) {
+  const gap = Number((currentRate - kpi.targetRate).toFixed(2));
 
   // Both halves of the daily-change picture: how many CSPs recovered today
   // vs. how many went active -> inactive today. Older rows (before
-  // newlyInactive was tracked) are skipped rather than shown as a fake zero —
-  // same rule as the range-trend data below.
-  const dailyChangeData: MergedTrendDatum[] = kpi.trend
-    .filter((s) => s.newlyInactive !== null && s.newlyInactive !== undefined)
-    .map((s) => ({
-      day: s.day,
-      recovered: s.recoveries,
-      newlyInactive: s.newlyInactive as number,
-      newlyInactiveDisplay: -(s.newlyInactive as number),
-    }));
+  // newlyInactive was tracked) are skipped rather than shown as a fake zero.
+  // This is whole-roster only — there's no per-person historical record of WHO
+  // changed on WHICH day to break down by LHO/RM/DC/search yet (that's the
+  // daily-diff log — see SKILLS.md task 5). Showing whole-roster bars on a
+  // chart that's otherwise filtered to e.g. one LHO would misleadingly imply
+  // they're specific to that LHO, so they're hidden entirely whenever a
+  // secondary filter is active — the line (which IS filter-accurate for
+  // today) is all that shows in that case.
+  const dailyChangeData: MergedTrendDatum[] = hasSecondaryFilter
+    ? []
+    : kpi.trend
+        .filter((s) => s.newlyInactive !== null && s.newlyInactive !== undefined)
+        .map((s) => ({
+          day: s.day,
+          recovered: s.recoveries,
+          newlyInactive: s.newlyInactive as number,
+          newlyInactiveDisplay: -(s.newlyInactive as number),
+        }));
+
+  // The count LINE's history genuinely doesn't exist broken down by LHO/RM/DC/
+  // search — only per range-bucket, per day, is stored. So when a secondary
+  // filter is active, the line honestly shows just today's point rather than
+  // fabricating history for a combination that was never recorded.
+  const countSeries = hasSecondaryFilter ? [liveToday] : kpi.rangeTrend;
 
   // One graph, one X axis (day, spanning up to a month): the range-trend
   // count and the recovered/newly-inactive bars are merged by day rather than
-  // drawn as two separate charts. Neither dataset's own computation changed —
-  // this only combines them for display. A day missing from one side (e.g.
-  // today, before the daily job has logged newlyInactive) simply leaves that
-  // field undefined so its bar/line point doesn't render, rather than a fake 0.
+  // drawn as two separate charts. A day missing from one side simply leaves
+  // that field undefined so its bar/line point doesn't render, rather than a
+  // fake 0.
   const mergedTrendMap = new Map<string, MergedTrendDatum>();
-  for (const p of kpi.rangeTrend) {
+  for (const p of countSeries) {
     mergedTrendMap.set(p.day, { ...mergedTrendMap.get(p.day), day: p.day, count: p.count });
   }
   for (const d of dailyChangeData) {
@@ -119,37 +161,33 @@ export default function KpiPanel({ kpi, range, rangeCounts, filteredCount }: Pro
 
       <div className="kpi-hero">
         <div className="kpi-hero__main">
-          <span
-            className={`kpi-hero__value${
-              kpi.onTarget ? " kpi-hero__value--good" : " kpi-hero__value--bad"
-            }`}
-          >
-            {kpi.currentRate}%
+          <span className={`kpi-hero__value${onTarget ? " kpi-hero__value--good" : " kpi-hero__value--bad"}`}>
+            {currentRate}%
           </span>
           <span className="kpi-hero__label">
-            Current inactivity ({kpi.currentInactive} of {kpi.totalPeople} measurable
-            {kpi.unknownPeople > 0 && `; ${kpi.unknownPeople} unmeasurable`})
+            {filterLabel} &mdash; {filteredCount} of {totalCount} CSP{totalCount === 1 ? "" : "s"}
+            {range === "90+" && "  ·  ignored: no active work, counted in Total CSPs only"}
           </span>
-          <span className={`status-pill ${kpi.onTarget ? "status--delivered" : "status--failed"}`}>
-            <span aria-hidden="true">{kpi.onTarget ? "✓" : "✕"}</span>{" "}
-            {kpi.onTarget
-              ? `On target`
-              : `${gap > 0 ? "+" : ""}${gap} pts above target`}
+          <span className={`status-pill ${onTarget ? "status--delivered" : "status--failed"}`}>
+            <span aria-hidden="true">{onTarget ? "✓" : "✕"}</span>{" "}
+            {onTarget ? `On target` : `${gap > 0 ? "+" : ""}${gap} pts above target`}
           </span>
         </div>
 
         <div className="kpi-grid">
-          <div className="delivery-stat">
-            <span className="delivery-stat__value delivery-stat__value--warn">{filteredCount}</span>
+          <button type="button" className="delivery-stat delivery-stat--clickable" onClick={onFilteredCardClick}>
+            <span
+              className={`delivery-stat__value ${range === "90+" ? "delivery-stat__value--muted" : "delivery-stat__value--warn"}`}
+            >
+              {filteredCount}
+            </span>
             <span className="delivery-stat__label">
-              Inactive &mdash; {RANGE_FILTER_LABELS[range]} (follows the header filter)
+              {range === "90+" ? "Ignored" : "Inactive"} &mdash; {filterLabel} (click to view)
             </span>
-          </div>
+          </button>
           <div className="delivery-stat">
-            <span className="delivery-stat__value delivery-stat__value--good">
-              {kpi.recoveries}
-            </span>
-            <span className="delivery-stat__label">Activated successfully</span>
+            <span className="delivery-stat__value delivery-stat__value--good">{kpi.recoveries}</span>
+            <span className="delivery-stat__label">Activated successfully (30d)</span>
           </div>
           <div className="delivery-stat">
             <span className="delivery-stat__value">{kpi.recoveryRate}%</span>
@@ -160,7 +198,9 @@ export default function KpiPanel({ kpi, range, rangeCounts, filteredCount }: Pro
 
       <div className="kpi-chart-header">
         <span className="kpi-chart-header__title">Trends &mdash; day by day, over the month</span>
-        <span className="panel__subtitle">Follows the header filter &mdash; today is always live</span>
+        <span className="panel__subtitle">
+          {hasSecondaryFilter ? "Today only — no history for this combination yet" : "Follows every filter above"}
+        </span>
       </div>
 
       {mergedTrend.length >= 1 ? (
@@ -196,9 +236,7 @@ export default function KpiPanel({ kpi, range, rangeCounts, filteredCount }: Pro
                 domain={[0, (max: number) => Math.max(max, 1)]}
               />
               <ReferenceLine yAxisId="change" y={0} stroke="var(--baseline)" />
-              <Tooltip
-                content={(p) => <CombinedTrendTooltip {...p} rangeLabel={RANGE_FILTER_LABELS[range]} />}
-              />
+              <Tooltip content={(p) => <CombinedTrendTooltip {...p} filterLabel={filterLabel} />} />
               <Legend
                 formatter={(value: string) => (
                   <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>{value}</span>
@@ -224,7 +262,7 @@ export default function KpiPanel({ kpi, range, rangeCounts, filteredCount }: Pro
                 yAxisId="count"
                 type="monotone"
                 dataKey="count"
-                name={`CSPs (${RANGE_FILTER_LABELS[range]})`}
+                name={`CSPs (${filterLabel})`}
                 stroke="var(--series-1)"
                 strokeWidth={2}
                 dot={{ r: 4 }}
@@ -234,8 +272,9 @@ export default function KpiPanel({ kpi, range, rangeCounts, filteredCount }: Pro
           </ResponsiveContainer>
           {mergedTrend.length === 1 && (
             <p className="empty-state empty-state--muted">
-              Only today&rsquo;s point is available yet &mdash; more of the month fills in as the daily
-              job keeps running.
+              {hasSecondaryFilter
+                ? "History isn't available for LHO/RM/DC/search combinations yet — only today's count."
+                : "Only today's count is available for this range yet — the line fills in as the daily job records more days."}
             </p>
           )}
         </>
@@ -245,27 +284,41 @@ export default function KpiPanel({ kpi, range, rangeCounts, filteredCount }: Pro
 
       <div className="tier-strip">
         {kpi.byTier.map((t) => (
-          <div key={t.tier} className={`tier-chip tier-chip--${t.tier}`}>
+          <button
+            type="button"
+            key={t.tier}
+            className={`tier-chip tier-chip--${t.tier} tier-chip--clickable`}
+            onClick={() => onTierChipClick(t.tier as Tier)}
+          >
             <span className="tier-chip__count">{t.count}</span>
             <span className="tier-chip__label">{t.label}</span>
             <span className="tier-chip__range">{t.range}</span>
-          </div>
+          </button>
         ))}
       </div>
 
       {rangeCounts && (
         <div className="range-strip">
-          <span className="range-strip__label">By inactivity range &mdash; filter selection highlighted</span>
+          <span className="range-strip__label">
+            By inactivity range &mdash; click to filter &middot; 90+ includes unmeasurable CSPs, ignored from
+            Inactive totals under "All Days" (still counted in Total CSPs)
+          </span>
           <div className="range-strip__row">
-            {RANGE_OPTIONS.map((opt) => (
-              <div
-                key={opt}
-                className={`range-chip${opt === range ? " range-chip--active" : ""}`}
-              >
-                <span className="range-chip__count">{rangeCounts[opt]}</span>
-                <span className="range-chip__label">{RANGE_LABELS[opt]}</span>
-              </div>
-            ))}
+            {RANGE_OPTIONS.map((opt) => {
+              const ignored = opt === "90+";
+              return (
+                <button
+                  type="button"
+                  key={opt}
+                  className={`range-chip range-chip--clickable${opt === range ? " range-chip--active" : ""}${ignored ? " range-chip--ignored" : ""}`}
+                  onClick={() => onRangeChipClick(opt)}
+                >
+                  <span className="range-chip__count">{rangeCounts[opt]}</span>
+                  <span className="range-chip__label">{RANGE_LABELS[opt]}</span>
+                  {ignored && <span className="range-chip__tag">Ignored &middot; no active work</span>}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}

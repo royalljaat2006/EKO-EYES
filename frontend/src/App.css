@@ -374,6 +374,18 @@
   color: var(--text-secondary);
 }
 
+.stat-tile--clickable {
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.stat-tile--clickable:hover {
+  background: var(--hover-wash);
+  border-color: var(--series-1);
+}
+
 .panel {
   background: var(--surface-1);
   border: 1px solid var(--border);
@@ -507,6 +519,10 @@
   color: var(--warning);
 }
 
+.delivery-stat__value--muted {
+  color: var(--muted);
+}
+
 .tier-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
@@ -559,6 +575,18 @@
 
 .tier-chip--critical {
   border-left-color: var(--critical);
+}
+
+.tier-chip--clickable {
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  transition: background 0.15s ease;
+}
+
+.tier-chip--clickable:hover {
+  background: var(--hover-wash);
 }
 
 .kpi-chart-header {
@@ -629,6 +657,48 @@
   color: #ffffff;
 }
 
+.range-chip--clickable {
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.range-chip--clickable:not(.range-chip--active):hover {
+  background: var(--hover-wash);
+  border-color: var(--series-1);
+}
+
+/* 90+ is dashboard-"ignored" — visually set apart from the actionable
+   buckets so it reads as "exists, but nobody's working it" rather than a
+   normal Inactive bucket. */
+.range-chip--ignored {
+  border-style: dashed;
+  opacity: 0.75;
+}
+
+.range-chip--ignored .range-chip__count {
+  color: var(--muted);
+}
+
+.range-chip--ignored.range-chip--active {
+  border-color: var(--muted);
+  background: var(--muted);
+  opacity: 1;
+}
+
+.range-chip__tag {
+  font-size: 10px;
+  font-style: italic;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+
+.range-chip--active .range-chip__tag {
+  color: #ffffff;
+}
+
 /* --- Alert delivery panel --- */
 
 .delivery-stats {
@@ -645,6 +715,20 @@
   padding: 12px 16px;
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+.delivery-stat--clickable {
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: var(--surface-1);
+  width: 100%;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.delivery-stat--clickable:hover {
+  background: var(--hover-wash);
+  border-color: var(--series-1);
 }
 
 .delivery-stat__value {
@@ -1139,6 +1223,67 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-bottom: 4px;
+}
+
+/* --- Today's changes (named daily-diff log) --- */
+
+.daily-changes__columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 24px;
+}
+
+.daily-changes__column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.daily-changes__column-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.daily-changes__column-title--bad {
+  color: var(--critical);
+}
+
+.daily-changes__column-title--good {
+  color: var(--good);
+}
+
+.daily-changes__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.daily-changes__item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--row-stripe);
+}
+
+.daily-changes__item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.daily-changes__item-meta {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* --- Test delivery panel --- */

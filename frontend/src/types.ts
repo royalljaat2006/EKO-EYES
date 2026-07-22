@@ -125,6 +125,27 @@ export interface DeliverySummary {
   people: PersonDeliveryStatus[];
 }
 
+export interface InactivityOnsetEntry {
+  personName: string;
+  cspCode: string;
+  tier: string | null;
+  days: number;
+  onsetAt: string;
+}
+
+export interface RecoveryEntry {
+  personName: string;
+  tierAtRecovery: string | null;
+  daysFlagged: number | null;
+  recoveredAt: string;
+}
+
+export interface DailyChanges {
+  day: string;
+  newlyInactive: InactivityOnsetEntry[];
+  recovered: RecoveryEntry[];
+}
+
 export interface TestChannelResult {
   attempted: boolean;
   success: boolean;

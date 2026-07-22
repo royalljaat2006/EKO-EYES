@@ -33,6 +33,18 @@ Every daily run (`backend/src/jobs/dailyJob.ts`) follows this exact order:
 separation of tiering/guardrails/sending into distinct steps is what makes each
 piece independently testable and auditable.
 
+### Two named audit logs, same shape
+
+`recovery_log` (who went inactive→active) has a twin: `inactivity_onset_log`
+(who went active→inactive), written by
+`backend/src/services/dailyChangeLog.service.ts` and populated from
+`dailyJob.ts` step 3 (`evaluated.filter(e => e.reason === "entered-tier")`).
+Both are per-person, per-day, named rows — not just aggregate counts — so the
+dashboard's "Today's changes" panel (`DailyChangesPanel.tsx`, backed by
+`GET /api/daily-changes[?day=YYYY-MM-DD]`) can list exactly who, not just how
+many. If a future job needs a third "who changed state today" feed, follow
+this same pattern rather than inventing a new shape.
+
 ### The anti-nagging cadence guardrail
 
 Every escalation tier has `resendEveryDays` (currently 1 for all tiers). A
@@ -71,11 +83,33 @@ one aggregate digest — an aggregate summary can't fit the single-CSP template.
   non-overlapping day buckets, `[min, max)`. Defined once in
   `backend/src/config/inactivityRanges.ts` and mirrored in
   `frontend/src/rangeOptions.ts`. `RangeFilter` extends it with `"all"` (union
-  of every bucket, i.e. every flagged CSP — NOT literally every CSP; healthy/
-  unmeasurable rows are never included).
+  of every bucket).
 - **`Status`** (`inactive | at-risk | healthy | unknown`) — a coarser, 4-way
   bucket used for chart/status coloring (`frontend/src/statusOptions.ts`).
   Different axis from `RangeOption` — don't conflate the two.
+- **`Tier`** (`self | breach | escalated | critical`) — the REAL escalation
+  ladder, `[min, max]` INCLUSIVE both ends (unlike `RangeOption`'s exclusive
+  max) — self 3-7, breach 8-15, escalated 16-23, critical 24+. Backend source
+  of truth: `backend/src/config/escalation.ts`. Mirrored on the frontend in
+  `frontend/src/tierOptions.ts` (same duplication pattern as `RangeOption`)
+  purely so the dashboard's tier-strip clicks can filter client-side without
+  a round-trip. Three different taxonomies over the same `days` number —
+  don't assume any two of them share boundaries.
+- **Two dashboard-display variants of "is this CSP in bucket X," both live in
+  `rangeOptions.ts`**: `inRangeFilter` (pure — unmeasurable/`days === null`
+  never matches anything) and `inRangeFilterFolded` (unmeasurable folds into
+  `"90+"`/`"all"`). The folded variant is DASHBOARD DISPLAY ONLY — the real
+  alerting pipeline always uses the pure one and still correctly refuses to
+  guess a day count before nudging anyone. Don't let the folded variant leak
+  into anything that decides who gets a message.
+- **`isIgnoredBucket`** (also `rangeOptions.ts`) goes one step further: the
+  90+ bucket (real or unmeasurable) is excluded from the "Inactive" headline
+  under `"all"` specifically, because nobody is actively working those CSPs —
+  they still count toward `totalCount` (Total CSPs), and clicking the 90+
+  chip directly still reveals them (App.tsx's `visibleRecords` only applies
+  this extra filter when `range === "all"`). Same display-only scope as
+  `inRangeFilterFolded` — doesn't touch the alerting pipeline or
+  `AllCspsTable`'s independent controls.
 
 ### Keep frontend/backend enums mirrored, not imported
 
@@ -120,26 +154,45 @@ only reach for a modal if it's genuinely a blocking confirmation.
 
 ### Shared rendering, not copy-paste
 
-`FilteredResultsPanel.tsx` is the single "status chart + CSP table" renderer,
-used by both the LHO/RM/DC combo filter (`EntityResultsPanel.tsx`) and the
-universal search bar (`UniversalSearchBar.tsx`). Neither of those two compute
-their own chart/table markup — they compute a filtered `records[]` and hand it
-to `FilteredResultsPanel`. If a third "show me a filtered slice of the roster"
-feature is needed, make it produce a `records[]` and reuse this component
-rather than writing a fourth copy of the chart+table JSX.
+`FilteredResultsPanel.tsx` is the single "status chart + CSP table" renderer.
+It takes an already-filtered `records[]` and a `title` and renders — it never
+computes its own filter. As of the unification below, its one caller is
+`App.tsx`'s single `cardDetail` state (set by clicking any top card/chip); if
+a new "show me a filtered slice of the roster" feature is needed, make it
+produce a `records[]` and either feed `cardDetail` or reuse this component
+directly — don't write a second copy of the chart+table JSX.
 
-### Two different filter interaction models, on purpose
+### ONE unified filter, not several independent ones (important — this reversed an earlier version of this file)
 
-- **Combine-then-apply** (LHO/RM/DC): nothing filters until "View results" is
-  pressed, because the three dropdowns are meant to be combined with AND
-  before you see anything. Premature live-filtering on the first dropdown
-  would show a misleading intermediate result.
-- **Live-as-you-type** (universal search, the day-range chips): a single
-  input/choice with no combination step, so instant feedback is correct and
-  expected.
+Early on, LHO/RM/DC and the universal search bar each had their OWN "you
+picked something → here's a separate results panel with its own count and
+chart" flow (`EntityResultsPanel.tsx` existed for this). **That was
+explicitly reversed** — the user's framing: "don't create a separate number
+display set anywhere, just reflect the data in the top numbers section," and
+"the graph section also changes with the filter applied, don't make a
+separate section." `EntityResultsPanel.tsx` is deleted;
+`UniversalSearchBar.tsx` is now a pure controlled input.
 
-Pick the model based on whether the control **combines with other controls**
-before producing a meaningful result, not out of habit.
+The correct shape: **range + LHO/RM/DC + search all combine (AND) into ONE
+filtered record set**, computed once in `App.tsx`
+(`denominatorRecords`/`visibleRecords`), which is the ONLY thing that drives
+the top stat cards, the KPI %, the Trends graph, and the main table/chart. No
+UI element gets to show its own independently-filtered number — if it shows a
+count, that count comes from the one shared computation. Clicking a card is
+NOT a second filter mechanism — it just opens `FilteredResultsPanel` with
+whatever `visibleRecords`/tier-slice that specific card already represents.
+
+Interaction model per control still varies, deliberately:
+- **Combine-then-apply** (LHO/RM/DC dropdowns): nothing filters until "View
+  results," since they're meant to be combined with AND before you see
+  anything — live-filtering on the first dropdown would show a misleading
+  intermediate result. Applying just updates the SAME shared filter state.
+- **Live-as-you-type** (search, day-range chips, card clicks): instant,
+  because there's no combination step for a single input/choice.
+
+If you add a FOURTH filter dimension later, it goes through the same
+pattern: lift its value to `App.tsx`, fold it into
+`denominatorRecords`/`visibleRecords`, do not give it its own display.
 
 ### Consolidated filter menu
 
