@@ -72,11 +72,14 @@ const envSchema = z.object({
    * Recurring sheet refresh: re-reads the live spreadsheet and warms the
    * cache, so the dashboard is never far out of date and any layout/
    * connectivity problem is caught well before the noon send. Sends NO
-   * notifications itself. Default every 20 minutes.
+   * notifications itself. Default every 1 minute — the cadence a live
+   * viewer actually experiences is bounded by SHEET_CACHE_TTL_MS below, so
+   * keep the two in step.
    */
-  SHEET_REFRESH_CRON: z.string().default("*/20 * * * *"),
+  SHEET_REFRESH_CRON: z.string().default("* * * * *"),
   TIMEZONE: z.string().default("Asia/Kolkata"),
-  SHEET_CACHE_TTL_MS: z.coerce.number().default(300_000),
+  /** How long a cached sheet read is served before any request forces a fresh one. Keep in step with SHEET_REFRESH_CRON. */
+  SHEET_CACHE_TTL_MS: z.coerce.number().default(60_000),
 
   EMAIL_PROVIDER: z.enum(["smtp", "gmail_api"]).default("smtp"),
   SMTP_HOST: z.string().optional(),

@@ -60,28 +60,36 @@ export function evaluateAll(
   now: Date = new Date(),
 ): EvaluatedPerson[] {
   return records
-    .map((r) => evaluatePerson(r, states.get(r.targetPersonName), now))
+    .map((r) => evaluatePerson(r, states.get(r.cspCode), now))
     .filter((e): e is EvaluatedPerson => e !== null);
+}
+
+export interface RecoveredPerson {
+  cspCode: string;
+  personName: string;
 }
 
 /**
  * A recovery = someone who was previously in a tier but is now below the
  * early-warning floor (or gone from the sheet entirely). This is the metric
  * that tells us whether any of the alerting actually works.
+ *
+ * Keyed by cspCode (stable), not name — a name edit in the source sheet must
+ * never look like a recovery. See stateStore.service.ts's migration note.
  */
 export function detectRecoveries(
   records: InactivityRecord[],
   states: Map<string, PersonState>,
-): string[] {
+): RecoveredPerson[] {
   const currentlyFlagged = new Set(
     records
       .filter((r) => r.days !== null && tierForDays(r.days) !== null)
-      .map((r) => r.targetPersonName),
+      .map((r) => r.cspCode),
   );
-  const recovered: string[] = [];
-  for (const [name, state] of states) {
-    if (state.tier !== null && !currentlyFlagged.has(name)) {
-      recovered.push(name);
+  const recovered: RecoveredPerson[] = [];
+  for (const [cspCode, state] of states) {
+    if (state.tier !== null && !currentlyFlagged.has(cspCode)) {
+      recovered.push({ cspCode, personName: state.personName });
     }
   }
   return recovered;

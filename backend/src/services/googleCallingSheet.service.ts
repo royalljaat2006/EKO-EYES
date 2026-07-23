@@ -41,7 +41,8 @@ let cachedAt = 0;
 
 export async function fetchFromGoogleCallingSheet(force = false): Promise<InactivityRecord[]> {
   const now = Date.now();
-  if (!force && cached && now - cachedAt < env.SHEET_CACHE_TTL_MS) return cached;
+  const ttl = env.NODE_ENV === "development" ? 0 : env.SHEET_CACHE_TTL_MS;
+  if (!force && cached && now - cachedAt < ttl) return cached;
 
   const sheets = getSheetsClient();
   const res = await sheets.spreadsheets.values.get({

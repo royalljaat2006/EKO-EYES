@@ -20,7 +20,8 @@ const dateFormatter = new Intl.DateTimeFormat("en-IN", {
 
 /**
  * Ticks every second so it's obvious, at a glance, how close "now" is to the
- * 20-minute sheet refresh or the 12:00 PM daily send — both scheduled in IST.
+ * 12:00 PM daily send, scheduled in IST. (The sheet refresh itself now runs
+ * every minute, so there's no longer a meaningful gap to watch for that one.)
  */
 export default function LiveClock() {
   const [now, setNow] = useState(() => new Date());

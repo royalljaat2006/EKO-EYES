@@ -7,6 +7,7 @@ import type {
   InactivityQueryResult,
   KpiReport,
   TestDeliveryResult,
+  TuningReport,
 } from "../types";
 import type { RangeFilter } from "../rangeOptions";
 
@@ -40,6 +41,12 @@ export async function fetchKpiReport(range: RangeFilter): Promise<KpiReport> {
 /** The named audit trail: who specifically went active -> inactive today, and who recovered. Defaults to today. */
 export async function fetchDailyChanges(day?: string): Promise<DailyChanges> {
   const { data } = await client.get<DailyChanges>("/daily-changes", { params: day ? { day } : {} });
+  return data;
+}
+
+/** The adaptive nudge-cap's current value, bounds, and its full audited evaluation history. */
+export async function fetchAdaptiveTuning(): Promise<TuningReport> {
+  const { data } = await client.get<TuningReport>("/adaptive-tuning");
   return data;
 }
 

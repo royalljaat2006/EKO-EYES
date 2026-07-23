@@ -33,6 +33,69 @@ Every daily run (`backend/src/jobs/dailyJob.ts`) follows this exact order:
 separation of tiering/guardrails/sending into distinct steps is what makes each
 piece independently testable and auditable.
 
+### Fast raw refresh, slow-cadence logic
+
+Two independent knobs, deliberately not the same:
+
+- **`SHEET_REFRESH_CRON`** (default every 1 minute as of 2026-07-23, was 20)
+  + **`SHEET_CACHE_TTL_MS`** (kept in step, default 60_000ms) — how fast the
+    RAW sheet data / dashboard numbers catch up to an edit in the Calling
+    Sheet. Purely a read: re-fetch, refresh the cache, log tier counts for
+    monitoring. Safe to make as tight as the data source tolerates (Excel:
+    a local file read; Google Sheets: comfortably under quota at 1/min).
+- **`DAILY_JOB_CRON`** (noon IST, unchanged) — the only cadence that runs
+  `detectRecoveries`/`evaluateAll`, writes to `recovery_log` /
+  `inactivity_onset_log` / `person_state`, re-evaluates adaptive tuning, and
+  sends real messages.
+
+Don't collapse these into one interval. Running the STATE-COMPARISON logic
+(recovered vs. newly-inactive, person_state writes, adaptive tuning) on the
+fast cadence would let a single person flip active→inactive→active several
+times in one day as the sheet gets edited back and forth, producing
+duplicate onset/recovery log entries and repeatedly resetting their nudge
+count — noise in exactly the tables the adaptive-tuning loop above learns
+from. The anti-nagging cadence guardrail (`resendEveryDays`) also assumes
+"once a day" is the unit of comparison. If a future request wants the
+dashboard to feel more real-time, tighten `SHEET_REFRESH_CRON`/
+`SHEET_CACHE_TTL_MS` — leave `DAILY_JOB_CRON` alone unless the request is
+specifically about changing send frequency or state-comparison granularity
+(a much bigger, riskier change — would need the anti-nagging guardrail and
+adaptive-tuning sampling re-thought at the same time).
+
+### Adaptive tuning — a bounded feedback loop, not self-modifying code
+
+`backend/src/services/adaptiveTuning.service.ts` adjusts the CSP nudge cap
+(`CSP_MAX_NUDGES`, normally a static env var) once per daily job run, based
+on how many nudges CSPs had already received when they recovered
+(`recovery_log.nudge_count_at_recovery`, captured in `dailyJob.ts` via
+`getNudgeCount()` BEFORE `resetEngagement()` wipes it). If this pattern
+comes up again — someone asks for "self-learning," "adaptive," or "the
+system should improve itself" — reuse this shape rather than reaching for
+anything that edits its own source or redeploys itself:
+
+- **Clamp the parameter to a fixed safety range** (`MIN_CAP`/`MAX_CAP` here
+  are 2–6) — it can never drift to something absurd or unsafe (e.g. 0
+  nudges, or 50).
+- **Move at most one step per evaluation** (`currentCap ± 1`) — no wild
+  jumps from one day's data.
+- **Require a minimum sample size** (`MIN_SAMPLE`) before acting at all —
+  otherwise it "adjusts" to noise.
+- **Log every evaluation, including no-ops**, to an audit table
+  (`tuning_adjustments`) with the reasoning that produced it — never a
+  silent parameter change. `getTuningReport()` / `GET /api/adaptive-tuning`
+  / `AdaptiveTuningPanel.tsx` surface that history on the dashboard itself,
+  same transparency principle as `DailyChangesPanel`.
+- **The runtime value lives in a `tuning_state` table**, read via
+  `getEffectiveMaxNudges()` — `env.CSP_MAX_NUDGES` is only the starting
+  point before any tuning history exists. `cspEngagement.service.ts`'s
+  `decideNudge()` calls the tuned getter, not the env var, directly.
+
+To test this kind of loop, insert synthetic rows straight into the local
+dev SQLite file and call the service function directly (or via a throwaway
+`ts-node` script) — do NOT hit `POST /api/job-runs/trigger` to test it. That
+endpoint runs the real send pipeline and messages actual CSPs/RMs/DCs; it
+is not a dry-run and has no test mode.
+
 ### Two named audit logs, same shape
 
 `recovery_log` (who went inactive→active) has a twin: `inactivity_onset_log`
@@ -229,7 +292,7 @@ dynamically. Static tags Vite itself emits into `index.html`
 `whatsapp-claw.service` — never touch that block when editing nginx/systemd
 config).
 
-**How:** `run_deploy.py` (repo root, gitignored — see §5) does the whole
+**How:** `tools/run_deploy.py` (gitignored — see §5) does the whole
 cycle: tars the repo (excluding `node_modules`/`dist`/`.git`/`.sqlite*`),
 SCPs it over, extracts, rewrites `.env` PORT/SERVER_BASE_URL, runs
 `npm install && npm run build` for both `backend/` and `frontend/` **on the
@@ -257,10 +320,10 @@ exited 0.
 
 **Never commit:** `backend/.env`, `backend/secrets/*.json` (Google service
 account key), `backend/data/*.xlsx`/`*.sqlite*` (real CSP/RM/DC PII), or any
-of the one-off debugging scripts in the repo root that have the production
-SSH/sudo password hardcoded (`run_deploy.py`, `curl_local.py`,
-`inspect_recon_conf.py`, `read_claw_snippet.py`, `read_inactive_logs.py`,
-`read_nginx_recon.py`) — all covered by `.gitignore` already; don't remove
+of the one-off debugging scripts in `tools/` that have the production
+SSH/sudo password hardcoded (`tools/run_deploy.py`, `tools/curl_local.py`,
+`tools/inspect_recon_conf.py`, `tools/read_claw_snippet.py`, `tools/read_inactive_logs.py`,
+`tools/read_nginx_recon.py`) — all covered by `.gitignore` already; don't remove
 those entries. If you add a NEW script that talks to the rack server, assume
 it'll need credentials and gitignore it preemptively rather than after the fact.
 

@@ -3,9 +3,26 @@ import { Tier } from "../config/escalation";
 import { KpiSnapshot } from "../types";
 import { RangeOption } from "../config/inactivityRanges";
 
+// person_state used to be keyed by person_name. A name edit in the source
+// sheet (typo fix, capitalization, adding a surname) then looked exactly
+// like "the old name recovered" + "a brand new person went inactive" — same
+// physical CSP, counted as two. Re-keyed by csp_code (stable) instead. If
+// an old name-keyed table is still around, rename it aside (kept for
+// reference/audit, never auto-deleted) rather than migrating its rows: the
+// only rows worth preserving are ones whose name DIDN'T change, and those
+// will simply reappear as "entered-tier" once on the next run — a one-time,
+// harmless bookkeeping reset (resendEveryDays=1 on every tier already means
+// a currently-flagged CSP is messaged daily regardless of the reason label;
+// see SKILLS.md "Key state by csp_code, not name").
+const personStateCols = db.pragma(`table_info(person_state)`) as { name: string }[];
+if (personStateCols.length > 0 && !personStateCols.some((c) => c.name === "csp_code")) {
+  db.exec(`ALTER TABLE person_state RENAME TO person_state_legacy_by_name`);
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS person_state (
-    person_name TEXT PRIMARY KEY,
+    csp_code TEXT PRIMARY KEY,
+    person_name TEXT NOT NULL,
     tier TEXT,
     days INTEGER NOT NULL,
     first_flagged_at TEXT,
@@ -52,7 +69,28 @@ try {
   // Column already exists — fine.
 }
 
+// How many nudges the CSP had already received when they recovered — the
+// signal the adaptive-tuning loop (adaptiveTuning.service.ts) learns from.
+// Null for rows recorded before this column existed, or when the recovered
+// person had no CSP code to look up.
+try {
+  db.exec(`ALTER TABLE recovery_log ADD COLUMN nudge_count_at_recovery INTEGER`);
+} catch {
+  // Column already exists — fine.
+}
+
+// The stable identifier alongside person_name, for the same reason
+// person_state was re-keyed above — lets a name change be told apart from
+// an actual recovery when auditing this table later. Null for rows
+// recorded before this column existed.
+try {
+  db.exec(`ALTER TABLE recovery_log ADD COLUMN csp_code TEXT`);
+} catch {
+  // Column already exists — fine.
+}
+
 export interface PersonState {
+  cspCode: string;
   personName: string;
   tier: Tier | null;
   days: number;
@@ -61,6 +99,7 @@ export interface PersonState {
 }
 
 interface PersonStateRow {
+  csp_code: string;
   person_name: string;
   tier: Tier | null;
   days: number;
@@ -68,17 +107,19 @@ interface PersonStateRow {
   last_notified_at: string | null;
 }
 
+/** Keyed by csp_code — see the migration note above CREATE TABLE person_state. */
 export function loadPersonStates(): Map<string, PersonState> {
   const rows = db
     .prepare(
-      `SELECT person_name, tier, days, first_flagged_at, last_notified_at FROM person_state`,
+      `SELECT csp_code, person_name, tier, days, first_flagged_at, last_notified_at FROM person_state`,
     )
     .all() as PersonStateRow[];
 
   return new Map(
     rows.map((r) => [
-      r.person_name,
+      r.csp_code,
       {
+        cspCode: r.csp_code,
         personName: r.person_name,
         tier: r.tier,
         days: r.days,
@@ -90,6 +131,7 @@ export function loadPersonStates(): Map<string, PersonState> {
 }
 
 export function upsertPersonState(
+  cspCode: string,
   personName: string,
   tier: Tier | null,
   days: number,
@@ -97,22 +139,28 @@ export function upsertPersonState(
   now: string,
 ): void {
   db.prepare(
-    `INSERT INTO person_state (person_name, tier, days, first_flagged_at, last_notified_at, updated_at)
-     VALUES (@personName, @tier, @days, @now, @lastNotified, @now)
-     ON CONFLICT(person_name) DO UPDATE SET
+    `INSERT INTO person_state (csp_code, person_name, tier, days, first_flagged_at, last_notified_at, updated_at)
+     VALUES (@cspCode, @personName, @tier, @days, @now, @lastNotified, @now)
+     ON CONFLICT(csp_code) DO UPDATE SET
+       person_name = @personName,
        tier = @tier,
        days = @days,
        first_flagged_at = COALESCE(person_state.first_flagged_at, @now),
        last_notified_at = COALESCE(@lastNotified, person_state.last_notified_at),
        updated_at = @now`,
-  ).run({ personName, tier, days, now, lastNotified: notifiedNow ? now : null });
+  ).run({ cspCode, personName, tier, days, now, lastNotified: notifiedNow ? now : null });
 }
 
 /** Clears tier state and records the recovery — the metric that proves impact. */
-export function recordRecovery(personName: string, now: string): void {
+export function recordRecovery(
+  cspCode: string,
+  personName: string,
+  now: string,
+  nudgeCountAtRecovery: number | null = null,
+): void {
   const state = db
-    .prepare(`SELECT tier, days, first_flagged_at FROM person_state WHERE person_name = ?`)
-    .get(personName) as
+    .prepare(`SELECT tier, days, first_flagged_at FROM person_state WHERE csp_code = ?`)
+    .get(cspCode) as
     | { tier: Tier | null; days: number; first_flagged_at: string | null }
     | undefined;
 
@@ -127,14 +175,14 @@ export function recordRecovery(personName: string, now: string): void {
       : null;
 
   db.prepare(
-    `INSERT INTO recovery_log (person_name, tier_at_recovery, days_flagged, recovered_at)
-     VALUES (?, ?, ?, ?)`,
-  ).run(personName, state?.tier ?? null, daysFlagged, now);
+    `INSERT INTO recovery_log (person_name, tier_at_recovery, days_flagged, recovered_at, nudge_count_at_recovery, csp_code)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(personName, state?.tier ?? null, daysFlagged, now, nudgeCountAtRecovery, cspCode);
 
   db.prepare(
     `UPDATE person_state SET tier = NULL, first_flagged_at = NULL, last_notified_at = NULL,
-     updated_at = ? WHERE person_name = ?`,
-  ).run(now, personName);
+     updated_at = ? WHERE csp_code = ?`,
+  ).run(now, cspCode);
 }
 
 /** Older rows predate the range_counts column; those days simply have none. */

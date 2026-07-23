@@ -1,6 +1,7 @@
 import db from "./alertStore.service";
 import env from "../config/env";
 import { InactivityRecord } from "../types";
+import { getEffectiveMaxNudges } from "./adaptiveTuning.service";
 
 /**
  * Guardrails on messaging a CSP directly.
@@ -99,8 +100,11 @@ export function decideNudge(
 
   if (!record.cspMobile) return "no-mobile";
 
-  // 3. Messaging has demonstrably failed. Escalate to a human, not a 4th text.
-  if ((engagement?.nudgeCount ?? 0) >= env.CSP_MAX_NUDGES) return "nudge-cap-reached";
+  // 3. Messaging has demonstrably failed. Escalate to a human, not another
+  //    text. The cap itself is adaptively tuned within a fixed safety range
+  //    (adaptiveTuning.service.ts) — env.CSP_MAX_NUDGES is only the starting
+  //    point before any tuning history exists.
+  if ((engagement?.nudgeCount ?? 0) >= getEffectiveMaxNudges()) return "nudge-cap-reached";
 
   // 4. Breathing room.
   if (engagement?.lastNudgedAt) {
@@ -145,6 +149,14 @@ export function suppressFromReply(
 /** Back to active — wipe the slate so a future lapse starts fresh. */
 export function resetEngagement(cspCode: string): void {
   db.prepare(`DELETE FROM csp_engagement WHERE csp_code = ?`).run(cspCode);
+}
+
+/** Nudge count as of right now — read BEFORE resetEngagement() on recovery, so the adaptive-tuning loop can learn how many nudges it actually took. */
+export function getNudgeCount(cspCode: string): number {
+  const row = db.prepare(`SELECT nudge_count FROM csp_engagement WHERE csp_code = ?`).get(cspCode) as
+    | { nudge_count: number }
+    | undefined;
+  return row?.nudge_count ?? 0;
 }
 
 export function findByMobile(mobile: string): string | null {

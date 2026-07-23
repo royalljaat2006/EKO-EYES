@@ -16,12 +16,7 @@ backend/data/*.sqlite-*
 
 # One-off scripts written during live-server debugging — each has the
 # production SSH/sudo password hardcoded. Never commit these as-is.
-curl_local.py
-inspect_recon_conf.py
-read_claw_snippet.py
-read_inactive_logs.py
-read_nginx_recon.py
-run_deploy.py
+tools/
 
 # Editor/OS cruft
 .DS_Store

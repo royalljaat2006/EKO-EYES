@@ -9,6 +9,7 @@ import AllCspsTable from "./components/AllCspsTable";
 import TriggerRunButton from "./components/TriggerRunButton";
 import TestDeliveryPanel from "./components/TestDeliveryPanel";
 import DailyChangesPanel from "./components/DailyChangesPanel";
+import AdaptiveTuningPanel from "./components/AdaptiveTuningPanel";
 import FilterMenu from "./components/FilterMenu";
 import FilteredResultsPanel from "./components/FilteredResultsPanel";
 import { PICK } from "./components/EntityFilterBar";
@@ -254,6 +255,7 @@ export default function App() {
             )}
 
             <DailyChangesPanel />
+            <AdaptiveTuningPanel />
 
             <SummaryChart data={summaryByRm} thresholdLabel={filterLabel} />
             <DataTable records={visibleRecords} thresholdLabel={filterLabel} />

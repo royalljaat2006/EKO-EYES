@@ -13,6 +13,7 @@ import { getKpiReport } from "../services/kpi.service";
 import { fetchRecords } from "../services/dataSource.service";
 import { runTestDelivery } from "../services/testDelivery.service";
 import { getDailyChanges } from "../services/dailyChangeLog.service";
+import { getTuningReport } from "../services/adaptiveTuning.service";
 import logger from "../utils/logger";
 
 const router = Router();
@@ -112,6 +113,21 @@ router.get("/daily-changes", (req, res) => {
   } catch (err) {
     logger.error({ err }, "Failed to load daily changes");
     return res.status(500).json({ error: "Failed to load daily changes" });
+  }
+});
+
+/**
+ * GET /api/adaptive-tuning
+ * The self-tuning nudge cap's current value, its fixed safety bounds, and
+ * the audited history of every evaluation (including "no change" ones) that
+ * got it there — see adaptiveTuning.service.ts.
+ */
+router.get("/adaptive-tuning", (_req, res) => {
+  try {
+    return res.json(getTuningReport());
+  } catch (err) {
+    logger.error({ err }, "Failed to load adaptive tuning report");
+    return res.status(500).json({ error: "Failed to load adaptive tuning report" });
   }
 });
 

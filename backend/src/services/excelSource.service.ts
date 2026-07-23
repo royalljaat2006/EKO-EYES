@@ -42,7 +42,8 @@ let cachedAt = 0;
 
 export async function fetchFromExcel(force = false): Promise<InactivityRecord[]> {
   const now = Date.now();
-  if (!force && cached && now - cachedAt < env.SHEET_CACHE_TTL_MS) return cached;
+  const ttl = env.NODE_ENV === "development" ? 0 : env.SHEET_CACHE_TTL_MS;
+  if (!force && cached && now - cachedAt < ttl) return cached;
 
   const file = path.resolve(env.EXCEL_FILE_PATH);
   if (!fs.existsSync(file)) {

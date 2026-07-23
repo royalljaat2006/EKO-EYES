@@ -146,6 +146,26 @@ export interface DailyChanges {
   recovered: RecoveryEntry[];
 }
 
+export interface TuningEvaluation {
+  id: number;
+  param: string;
+  oldValue: number;
+  newValue: number;
+  sampleSize: number;
+  nearCapShare: number | null;
+  earlyShare: number | null;
+  reason: string;
+  evaluatedAt: string;
+}
+
+export interface TuningReport {
+  param: string;
+  currentValue: number;
+  bounds: [number, number];
+  defaultValue: number;
+  history: TuningEvaluation[];
+}
+
 export interface TestChannelResult {
   attempted: boolean;
   success: boolean;

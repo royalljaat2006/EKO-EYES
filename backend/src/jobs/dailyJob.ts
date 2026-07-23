@@ -12,11 +12,13 @@ import {
 } from "../services/digest.service";
 import {
   decideNudge,
+  getNudgeCount,
   indexMobiles,
   loadEngagements,
   recordNudgeSent,
   resetEngagement,
 } from "../services/cspEngagement.service";
+import { runAdaptiveTuning } from "../services/adaptiveTuning.service";
 import { known, unknownCount } from "../services/inactivity.service";
 import { invalidateContactsCache } from "../services/contacts.service";
 import { detectRecoveries, evaluateAll } from "../services/escalation.service";
@@ -67,18 +69,31 @@ export async function runDailyInactivityJob(): Promise<DailyJobResult> {
     const states = loadPersonStates();
 
     // 1. Anyone who dropped out of a tier since the last run has recovered.
+    //    Matched by cspCode (stable), not name — see escalation.service.ts.
     const recovered = detectRecoveries(records, states);
-    const codeByName = new Map(records.map((r) => [r.targetPersonName, r.cspCode]));
-    for (const name of recovered) {
-      recordRecovery(name, runAt);
+    for (const { cspCode, personName } of recovered) {
+      // Read the nudge count BEFORE resetEngagement wipes it — this is the
+      // signal the adaptive-tuning loop below learns from.
+      const nudgeCountAtRecovery = getNudgeCount(cspCode);
+      recordRecovery(cspCode, personName, runAt, nudgeCountAtRecovery);
       // Wipe the nudge count so a future lapse starts from a clean slate rather
       // than resuming at an already-exhausted cap.
-      const code = codeByName.get(name);
-      if (code) resetEngagement(code);
+      resetEngagement(cspCode);
     }
     if (recovered.length > 0) {
-      logger.info({ recovered }, "People recovered since last run");
+      logger.info(
+        { recovered: recovered.map((r) => r.personName) },
+        "People recovered since last run",
+      );
     }
+
+    // 1b. Re-evaluate the adaptive nudge cap from recovery history so far,
+    //     BEFORE deciding today's nudges — see adaptiveTuning.service.ts.
+    const tuning = runAdaptiveTuning(runAt);
+    logger.info(
+      { from: tuning.oldValue, to: tuning.newValue, sampleSize: tuning.sampleSize },
+      "Adaptive tuning evaluation complete",
+    );
 
     // 2. Tier everyone and decide who is actually due a message today.
     const evaluated = evaluateAll(records, states, now);
@@ -152,6 +167,7 @@ export async function runDailyInactivityJob(): Promise<DailyJobResult> {
     for (const e of evaluated) {
       // evaluatePerson() only returns rows with a known days value, so this is safe.
       upsertPersonState(
+        e.record.cspCode,
         e.record.targetPersonName,
         e.policy.tier,
         e.record.days ?? 0,

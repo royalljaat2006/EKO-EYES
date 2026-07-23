@@ -12,7 +12,7 @@ export function startScheduler(): void {
     throw new Error(`Invalid DAILY_JOB_CRON expression: ${env.DAILY_JOB_CRON}`);
   }
 
-  // Every 20 minutes (default) — refresh + validate the spreadsheet. Sends
+  // Every 1 minute (default) — refresh + validate the spreadsheet. Sends
   // nothing; keeps the dashboard's data fresh and catches a broken sheet
   // connection well before the noon send.
   cron.schedule(

@@ -1,10 +1,10 @@
+import { useState } from "react";
 import {
   Bar,
   CartesianGrid,
   ComposedChart,
   Legend,
   Line,
-  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -48,14 +48,78 @@ function formatDayLabel(day: string): string {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 }
 
+/**
+ * The last `n` calendar days as "YYYY-MM-DD" strings, oldest first, ending
+ * today. Used to seed the X-axis with every real date up front — a
+ * recharts category axis spaces whatever entries exist evenly by INDEX, not
+ * by actual elapsed time, so without this a chart with only 2-3 real data
+ * points (normal in this system's first weeks) looks stretched evenly
+ * across the full width as if they were consecutive days. Seeding the full
+ * window fixes the spacing to real calendar time and means the chart
+ * visibly "grows" — more of the window has real dots — as the daily job
+ * keeps running, rather than looking complete on day one.
+ */
+function lastNDays(n: number): string[] {
+  const days: string[] = [];
+  const today = new Date();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    days.push(d.toISOString().slice(0, 10));
+  }
+  return days;
+}
+
+const WINDOW_OPTIONS = [7, 14, 30] as const;
+type WindowDays = (typeof WINDOW_OPTIONS)[number];
+type Frequency = "daily" | "weekly";
+
+/** The Monday on/before `day`, as "YYYY-MM-DD" — the bucket key for weekly grouping. */
+function weekStart(day: string): string {
+  const d = new Date(`${day}T00:00:00`);
+  const diffToMonday = (d.getDay() + 6) % 7; // Mon=0 ... Sun=6
+  d.setDate(d.getDate() - diffToMonday);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Collapses daily points into one-per-week: `count` (a point-in-time level,
+ * not a flow) takes the most recent day's value within the week, while
+ * `recovered`/`newlyInactive` (flows) are summed across the week — same
+ * stock-vs-flow distinction the dual Y-axes already draw.
+ */
+function toWeeklyBuckets(daily: MergedTrendDatum[]): MergedTrendDatum[] {
+  const buckets = new Map<
+    string,
+    { count?: number; countDay?: string; recovered?: number; newlyInactive?: number }
+  >();
+  for (const d of daily) {
+    const key = weekStart(d.day);
+    const bucket = buckets.get(key) ?? {};
+    if (d.count !== undefined && (!bucket.countDay || d.day > bucket.countDay)) {
+      bucket.count = d.count;
+      bucket.countDay = d.day;
+    }
+    if (d.recovered !== undefined) bucket.recovered = (bucket.recovered ?? 0) + d.recovered;
+    if (d.newlyInactive !== undefined) bucket.newlyInactive = (bucket.newlyInactive ?? 0) + d.newlyInactive;
+    buckets.set(key, bucket);
+  }
+  return Array.from(buckets.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, v]) => ({
+      day,
+      count: v.count,
+      recovered: v.recovered,
+      newlyInactive: v.newlyInactive,
+    }));
+}
+
 interface MergedTrendDatum {
   day: string;
   /** CSPs matching the current filter that day — undefined for days we don't have a figure for. */
   count?: number;
   recovered?: number;
   newlyInactive?: number;
-  /** Negated purely so the bar draws below the zero line; tooltip shows the real count. */
-  newlyInactiveDisplay?: number;
 }
 
 function CombinedTrendTooltip({
@@ -63,12 +127,15 @@ function CombinedTrendTooltip({
   payload,
   label,
   filterLabel,
-}: TooltipContentProps<ValueType, NameType> & { filterLabel: string }) {
+  frequency,
+}: TooltipContentProps<ValueType, NameType> & { filterLabel: string; frequency: "daily" | "weekly" }) {
   if (!active || !payload || payload.length === 0) return null;
   const p = payload[0].payload as MergedTrendDatum;
   return (
     <div className="chart-tooltip">
-      <div className="chart-tooltip__title">{formatDayLabel(label as string)}</div>
+      <div className="chart-tooltip__title">
+        {frequency === "weekly" ? `Week of ${formatDayLabel(label as string)}` : formatDayLabel(label as string)}
+      </div>
       {p.count !== undefined && (
         <div className="chart-tooltip__value">
           {p.count} CSP{p.count === 1 ? "" : "s"} ({filterLabel})
@@ -105,6 +172,12 @@ export default function KpiPanel({
 }: Props) {
   const gap = Number((currentRate - kpi.targetRate).toFixed(2));
 
+  // The graph's own filter — separate from the page-level range/LHO/RM/DC/
+  // search filters above. Purely a display choice over the same underlying
+  // data, so it's local state here rather than threaded through App.tsx.
+  const [windowDays, setWindowDays] = useState<WindowDays>(30);
+  const [frequency, setFrequency] = useState<Frequency>("daily");
+
   // Both halves of the daily-change picture: how many CSPs recovered today
   // vs. how many went active -> inactive today. Older rows (before
   // newlyInactive was tracked) are skipped rather than shown as a fake zero.
@@ -123,7 +196,6 @@ export default function KpiPanel({
           day: s.day,
           recovered: s.recoveries,
           newlyInactive: s.newlyInactive as number,
-          newlyInactiveDisplay: -(s.newlyInactive as number),
         }));
 
   // The count LINE's history genuinely doesn't exist broken down by LHO/RM/DC/
@@ -136,8 +208,13 @@ export default function KpiPanel({
   // count and the recovered/newly-inactive bars are merged by day rather than
   // drawn as two separate charts. A day missing from one side simply leaves
   // that field undefined so its bar/line point doesn't render, rather than a
-  // fake 0.
+  // fake 0. Seeded with every real calendar date in the window up front (see
+  // lastNDays) so the axis is spaced by actual elapsed time, not by however
+  // many days happen to have data yet.
   const mergedTrendMap = new Map<string, MergedTrendDatum>();
+  for (const day of lastNDays(30)) {
+    mergedTrendMap.set(day, { day });
+  }
   for (const p of countSeries) {
     mergedTrendMap.set(p.day, { ...mergedTrendMap.get(p.day), day: p.day, count: p.count });
   }
@@ -147,10 +224,16 @@ export default function KpiPanel({
       day: d.day,
       recovered: d.recovered,
       newlyInactive: d.newlyInactive,
-      newlyInactiveDisplay: d.newlyInactiveDisplay,
     });
   }
   const mergedTrend = Array.from(mergedTrendMap.values()).sort((a, b) => a.day.localeCompare(b.day));
+
+  // The graph-specific window/frequency filter applies here, on top of the
+  // full 30-day scaffold above — narrow to the selected window, then
+  // optionally collapse to one point per week.
+  const windowTrend = mergedTrend.slice(-windowDays);
+  const displayTrend = frequency === "weekly" ? toWeeklyBuckets(windowTrend) : windowTrend;
+  const daysWithData = windowTrend.filter((d) => d.count !== undefined || d.recovered !== undefined).length;
 
   return (
     <div className="panel">
@@ -197,24 +280,54 @@ export default function KpiPanel({
       </div>
 
       <div className="kpi-chart-header">
-        <span className="kpi-chart-header__title">Trends &mdash; day by day, over the month</span>
-        <span className="panel__subtitle">
-          {hasSecondaryFilter ? "Today only — no history for this combination yet" : "Follows every filter above"}
-        </span>
+        <div>
+          <span className="kpi-chart-header__title">
+            Trends &mdash; {frequency === "daily" ? "day by day" : "week by week"}, last {windowDays} days
+          </span>
+          <span className="panel__subtitle">
+            {hasSecondaryFilter ? "Today only — no history for this combination yet" : "Follows every filter above"}
+          </span>
+        </div>
+        <div className="chart-controls">
+          <div className="chart-controls__group" role="group" aria-label="Graph date window">
+            {WINDOW_OPTIONS.map((w) => (
+              <button
+                key={w}
+                type="button"
+                className={`chart-controls__btn${w === windowDays ? " chart-controls__btn--active" : ""}`}
+                onClick={() => setWindowDays(w)}
+              >
+                {w}d
+              </button>
+            ))}
+          </div>
+          <div className="chart-controls__group" role="group" aria-label="Graph data frequency">
+            {(["daily", "weekly"] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                className={`chart-controls__btn${f === frequency ? " chart-controls__btn--active" : ""}`}
+                onClick={() => setFrequency(f)}
+              >
+                {f === "daily" ? "Daily" : "Weekly"}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
-      {mergedTrend.length >= 1 ? (
+      {daysWithData >= 1 ? (
         <>
           <ResponsiveContainer width="100%" height={280}>
-            <ComposedChart data={mergedTrend} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+            <ComposedChart data={displayTrend} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
               <CartesianGrid vertical={false} stroke="var(--gridline)" />
               <XAxis
                 dataKey="day"
-                tickFormatter={formatDayLabel}
+                tickFormatter={(d: string) => (frequency === "weekly" ? `Wk ${formatDayLabel(d)}` : formatDayLabel(d))}
                 tick={{ fontSize: 11, fill: "var(--muted)" }}
                 axisLine={{ stroke: "var(--baseline)" }}
                 tickLine={false}
-                minTickGap={20}
+                minTickGap={150}
               />
               <YAxis
                 yAxisId="change"
@@ -223,7 +336,7 @@ export default function KpiPanel({
                 tickLine={false}
                 width={40}
                 allowDecimals={false}
-                tickFormatter={(v: number) => String(Math.abs(v))}
+                domain={[0, (max: number) => Math.max(max, 1)]}
               />
               <YAxis
                 yAxisId="count"
@@ -235,8 +348,7 @@ export default function KpiPanel({
                 allowDecimals={false}
                 domain={[0, (max: number) => Math.max(max, 1)]}
               />
-              <ReferenceLine yAxisId="change" y={0} stroke="var(--baseline)" />
-              <Tooltip content={(p) => <CombinedTrendTooltip {...p} filterLabel={filterLabel} />} />
+              <Tooltip content={(p) => <CombinedTrendTooltip {...p} filterLabel={filterLabel} frequency={frequency} />} />
               <Legend
                 formatter={(value: string) => (
                   <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>{value}</span>
@@ -245,36 +357,44 @@ export default function KpiPanel({
               <Bar
                 yAxisId="change"
                 dataKey="recovered"
-                name="Recovered"
-                fill="var(--good)"
+                name="Recovered (Left Y-Axis)"
+                fill="var(--good-wash)"
+                stroke="var(--good)"
+                strokeWidth={1}
                 radius={[4, 4, 0, 0]}
-                maxBarSize={28}
+                maxBarSize={30}
+                isAnimationActive={false}
               />
               <Bar
                 yAxisId="change"
-                dataKey="newlyInactiveDisplay"
-                name="Newly inactive"
-                fill="var(--critical)"
-                radius={[0, 0, 4, 4]}
-                maxBarSize={28}
+                dataKey="newlyInactive"
+                name="Newly Inactive (Left Y-Axis)"
+                fill="var(--critical-wash)"
+                stroke="var(--critical)"
+                strokeWidth={1}
+                radius={[4, 4, 0, 0]}
+                maxBarSize={30}
+                isAnimationActive={false}
               />
               <Line
                 yAxisId="count"
                 type="monotone"
                 dataKey="count"
-                name={`CSPs (${filterLabel})`}
+                name="Total Inactive CSPs (Right Y-Axis)"
                 stroke="var(--series-1)"
-                strokeWidth={2}
-                dot={{ r: 4 }}
+                strokeWidth={3}
+                dot={{ r: 4, strokeWidth: 2, fill: "var(--surface-1)" }}
+                activeDot={{ r: 6, strokeWidth: 2, fill: "var(--surface-1)" }}
+                connectNulls
                 isAnimationActive={false}
               />
             </ComposedChart>
           </ResponsiveContainer>
-          {mergedTrend.length === 1 && (
+          {daysWithData <= 1 && (
             <p className="empty-state empty-state--muted">
               {hasSecondaryFilter
                 ? "History isn't available for LHO/RM/DC/search combinations yet — only today's count."
-                : "Only today's count is available for this range yet — the line fills in as the daily job records more days."}
+                : "Only today's count is available for this range yet — the graph fills in, day by day at its real date, as the daily job keeps running."}
             </p>
           )}
         </>

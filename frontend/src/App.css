@@ -591,8 +591,9 @@
 
 .kpi-chart-header {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   margin-top: 20px;
   padding-top: 16px;
@@ -600,9 +601,48 @@
 }
 
 .kpi-chart-header__title {
+  display: block;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.chart-controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.chart-controls__group {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.chart-controls__btn {
+  font: inherit;
+  font-size: 11px;
+  padding: 5px 10px;
+  border: none;
+  border-right: 1px solid var(--border);
+  background: var(--row-stripe);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.chart-controls__group .chart-controls__btn:last-child {
+  border-right: none;
+}
+
+.chart-controls__btn:hover:not(.chart-controls__btn--active) {
+  background: var(--hover-wash);
+}
+
+.chart-controls__btn--active {
+  background: var(--series-1);
+  color: #ffffff;
 }
 
 .range-strip {
@@ -1284,6 +1324,90 @@
   font-size: 11px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* --- Adaptive tuning panel --- */
+
+.tuning-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.tuning-summary__value {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.tuning-summary__number {
+  font-size: 32px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.tuning-summary__label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.tuning-summary__reason {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.tuning-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.tuning-history__item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--row-stripe);
+}
+
+.tuning-history__delta {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.tuning-history__delta--up {
+  color: var(--warning);
+}
+
+.tuning-history__delta--down {
+  color: var(--good);
+}
+
+.tuning-history__meta {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tuning-history__reason {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 /* --- Test delivery panel --- */
