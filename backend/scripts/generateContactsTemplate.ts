@@ -2,15 +2,19 @@ import path from "node:path";
 import ExcelJS from "exceljs";
 import env from "../src/config/env";
 import logger from "../src/utils/logger";
-import { fetchFromExcel } from "../src/services/excelSource.service";
+import { fetchRecords } from "../src/services/dataSource.service";
 
 /**
  * The Calling Sheet has RM/DC *names* but no contact details, so the agent has
  * nobody to send to. This writes a contacts workbook pre-filled with every RM
  * and DC name found in the sheet — someone just fills in email + mobile.
+ *
+ * Reads through fetchRecords(), which honours DATA_SOURCE — so this always
+ * reflects whichever sheet (Excel or the live Google source) is currently
+ * configured, not a hardcoded one.
  */
 async function main() {
-  const records = await fetchFromExcel(true);
+  const records = await fetchRecords(true);
 
   const rms = new Map<string, number>();
   const dcs = new Map<string, number>();

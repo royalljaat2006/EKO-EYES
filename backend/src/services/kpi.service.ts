@@ -1,10 +1,11 @@
-import env from "../config/env";
 import { TIERS, tierForDays } from "../config/escalation";
 import { ALL_RANGES, inRangeFilter, RANGE_OPTIONS, RangeFilter } from "../config/inactivityRanges";
 import { InactivityRecord, KpiReport, KpiSnapshot } from "../types";
 import { fetchRecords } from "./dataSource.service";
 import { known, unknownCount } from "./inactivity.service";
 import { countRecoveries, getKpiTrend } from "./stateStore.service";
+import { CspEngagement, decideNudge, loadEngagements } from "./cspEngagement.service";
+import { getNumberSetting } from "./settings.service";
 
 /** Every bucket's count for that day, summed — the "all ranges" trend point. */
 function sumRangeCounts(rangeCounts: KpiSnapshot["rangeCounts"]): number | null {
@@ -32,6 +33,30 @@ export function summarizeTiers(records: InactivityRecord[]) {
   }));
 }
 
+/**
+ * "Non Responsive" — currently-tiered CSPs decideNudge would refuse to
+ * message again: nudge cap exhausted, or they explicitly asked us to stop.
+ * Reuses the real guardrail decision, not a separate heuristic, so this
+ * number always agrees with what the daily job actually does.
+ */
+function isNonResponsive(r: InactivityRecord, engagements: Map<string, CspEngagement>): boolean {
+  if (r.days === null || tierForDays(r.days) === null) return false;
+  const decision = decideNudge(r, engagements.get(r.cspCode));
+  return decision === "nudge-cap-reached" || decision === "suppressed-by-reply";
+}
+
+export function countNonResponsive(records: InactivityRecord[]): number {
+  const engagements = loadEngagements();
+  return known(records).filter((r) => isNonResponsive(r, engagements)).length;
+}
+
+export function listNonResponsive(records: InactivityRecord[]): InactivityRecord[] {
+  const engagements = loadEngagements();
+  return known(records)
+    .filter((r) => isNonResponsive(r, engagements))
+    .sort((a, b) => (b.days ?? 0) - (a.days ?? 0));
+}
+
 export async function getKpiReport(range?: RangeFilter): Promise<KpiReport> {
   const records = await fetchRecords();
   const measurable = known(records);
@@ -39,7 +64,7 @@ export async function getKpiReport(range?: RangeFilter): Promise<KpiReport> {
   // reported alongside it rather than folded in as healthy.
   const total = measurable.length;
 
-  const inactive = measurable.filter((r) => r.days > env.INACTIVITY_THRESHOLD_DAYS);
+  const inactive = measurable.filter((r) => r.days > getNumberSetting("inactivityThresholdDays"));
   const atRisk = measurable.filter((r) => tierForDays(r.days)?.tier === "self");
 
   const trend = getKpiTrend(30);
@@ -66,20 +91,23 @@ export async function getKpiReport(range?: RangeFilter): Promise<KpiReport> {
       ]
     : [];
 
+  const targetRate = getNumberSetting("targetInactivityRate");
+
   return {
-    targetRate: env.TARGET_INACTIVITY_RATE,
+    targetRate,
     currentRate,
     currentInactive: inactive.length,
     totalPeople: total,
     unknownPeople: unknownCount(records),
     atRisk: atRisk.length,
+    nonResponsive: countNonResponsive(records),
     recoveries,
     newBreaches: trend.reduce((sum, s) => sum + s.newBreaches, 0),
     recoveryRate:
       recoveries + inactive.length === 0
         ? 0
         : Number(((recoveries / (recoveries + inactive.length)) * 100).toFixed(1)),
-    onTarget: currentRate <= env.TARGET_INACTIVITY_RATE,
+    onTarget: currentRate <= targetRate,
     trend,
     byTier: summarizeTiers(records),
     rangeTrend,

@@ -1,5 +1,19 @@
+/**
+ * The three values the approved Goinfinito business template actually
+ * carries. When present, a provider that requires an approved template
+ * (Goinfinito, and Meta if it's later given a multi-variable template) should
+ * use these DIRECTLY rather than trying to recover them by pattern-matching
+ * `message` — see the note on GoinfinitoWhatsAppProvider for why that used to
+ * be fragile.
+ */
+export interface WhatsAppCspVars {
+  name: string;
+  cspCode: string;
+  days: number;
+}
+
 export interface WhatsAppProvider {
-  sendMessage(toMobile: string, message: string): Promise<string | void>;
+  sendMessage(toMobile: string, message: string, cspVars?: WhatsAppCspVars): Promise<string | void>;
 }
 
 /**

@@ -18,6 +18,10 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
     this.baseUrl = `https://graph.facebook.com/${env.WHATSAPP_META_API_VERSION}/${env.WHATSAPP_META_PHONE_NUMBER_ID}/messages`;
   }
 
+  // Meta's template here has a single free-text body placeholder ({{1}}), so
+  // the whole `message` string becomes what the recipient sees — cspVars
+  // isn't needed for extraction the way Goinfinito's 3-variable template
+  // needs it, but the parameter is accepted to satisfy the shared interface.
   async sendMessage(toMobile: string, message: string): Promise<void> {
     const to = normalizeMobile(toMobile).replace("+", "");
 

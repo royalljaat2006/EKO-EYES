@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import {
   Bar,
   BarChart,
@@ -13,6 +13,12 @@ import type { TooltipContentProps } from "recharts";
 import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import type { InactivityRecord } from "../types";
 import { statusOf, STATUS_META, STATUS_ORDER } from "../statusOptions";
+import { usePagination } from "../usePagination";
+import Panel from "./Panel";
+import Pager from "./Pager";
+import RowActions from "./RowActions";
+
+const PAGE_SIZE = 25;
 
 interface Props {
   /** What's shown as the panel heading — e.g. "LHO: Chandigarh" or a search query. */
@@ -65,20 +71,27 @@ export default function FilteredResultsPanel({
     [records],
   );
 
-  return (
-    <div className="panel">
-      <div className="panel__header">
-        <h2>{title}</h2>
-        <div className="entity-results__header-actions">
-          <span className="panel__subtitle">
-            {records.length} CSP{records.length === 1 ? "" : "s"}
-          </span>
-          <button type="button" className="entity-filter__clear" onClick={onClear}>
-            Clear
-          </button>
-        </div>
-      </div>
+  const { page, pageCount, visible, setPage, resetPage } = usePagination(records, PAGE_SIZE);
 
+  // A new title means a different card/filter was picked — a genuinely new
+  // query, not the same one with fewer rows — so start the reader back at
+  // page 1 instead of leaving them wherever they'd scrolled to before.
+  useEffect(() => {
+    resetPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title]);
+
+  return (
+    <Panel
+      title={title}
+      focusable
+      subtitle={`${records.length} CSP${records.length === 1 ? "" : "s"}`}
+      headerExtra={
+        <button type="button" className="entity-filter__clear" onClick={onClear}>
+          Clear
+        </button>
+      }
+    >
       {records.length > 0 && (
         <div className="entity-modal__chart">
           <span className="entity-modal__chart-title">Inactivity status</span>
@@ -117,30 +130,43 @@ export default function FilteredResultsPanel({
               <th>CSP Code</th>
               <th>CSP Name</th>
               <th>Days</th>
+              <th>Status</th>
               <th>Terminal</th>
               <th>CSP Mobile</th>
               <th>LHO</th>
               <th>RM</th>
               <th>DC</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {records.map((r, i) => (
-              <tr key={r.sourceRow}>
-                <td className="num">{i + 1}</td>
-                <td className="num">{r.cspCode || "—"}</td>
-                <td>{r.targetPersonName}</td>
-                <td className="num">{r.days ?? "—"}</td>
-                <td>{r.terminalStatus || "—"}</td>
-                <td className="num">{r.cspMobile || "—"}</td>
-                <td>{r.lhoName || "—"}</td>
-                <td>{r.rmName || "—"}</td>
-                <td>{r.dcName || "—"}</td>
-              </tr>
-            ))}
+            {visible.map((r, i) => {
+              const pill = STATUS_META[statusOf(r)];
+              return (
+                <tr key={r.sourceRow}>
+                  <td className="num">{page * PAGE_SIZE + i + 1}</td>
+                  <td className="num">{r.cspCode || "—"}</td>
+                  <td>{r.targetPersonName}</td>
+                  <td className="num">{r.days ?? "—"}</td>
+                  <td>
+                    <span className={`status-pill ${pill.className}`}>
+                      <span aria-hidden="true">{pill.icon}</span> {pill.label}
+                    </span>
+                  </td>
+                  <td>{r.terminalStatus || "—"}</td>
+                  <td className="num">{r.cspMobile || "—"}</td>
+                  <td>{r.lhoName || "—"}</td>
+                  <td>{r.rmName || "—"}</td>
+                  <td>{r.dcName || "—"}</td>
+                  <td>
+                    <RowActions record={r} />
+                  </td>
+                </tr>
+              );
+            })}
             {records.length === 0 && (
               <tr>
-                <td colSpan={9} className="empty-state">
+                <td colSpan={11} className="empty-state">
                   {emptyMessage}
                 </td>
               </tr>
@@ -148,6 +174,15 @@ export default function FilteredResultsPanel({
           </tbody>
         </table>
       </div>
-    </div>
+
+      <Pager
+        page={page}
+        pageCount={pageCount}
+        visibleCount={visible.length}
+        totalCount={records.length}
+        onPrev={() => setPage(page - 1)}
+        onNext={() => setPage(page + 1)}
+      />
+    </Panel>
   );
 }

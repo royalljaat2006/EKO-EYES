@@ -9,11 +9,21 @@ import {
   updateAlertDeliveryStatus,
 } from "../services/alertStore.service";
 import { runDailyInactivityJob } from "../jobs/dailyJob";
-import { getKpiReport } from "../services/kpi.service";
+import { countNonResponsive, getKpiReport, listNonResponsive } from "../services/kpi.service";
 import { fetchRecords } from "../services/dataSource.service";
 import { runTestDelivery } from "../services/testDelivery.service";
 import { getDailyChanges } from "../services/dailyChangeLog.service";
-import { getTuningReport } from "../services/adaptiveTuning.service";
+import { getTuningReport, resetTunedMaxNudges } from "../services/adaptiveTuning.service";
+import { getSettings, updateSettings } from "../services/settings.service";
+import {
+  getAllTemplates,
+  resetTemplate,
+  updateTemplates,
+} from "../services/templates.service";
+import { getMessageReach } from "../services/messageReach.service";
+import { getGeoBreakdown, getRmDcPerformance } from "../services/analytics.service";
+import { getAtRiskCsps, getDailySummary, getRecommendations } from "../services/insights.service";
+import { sendOneOffNudge } from "../services/oneOffNudge.service";
 import logger from "../utils/logger";
 
 const router = Router();
@@ -89,6 +99,106 @@ router.get("/kpi", async (req, res) => {
   }
 });
 
+/**
+ * GET /api/non-responsive
+ * The named list behind the "Non Responsive" KPI count — currently-inactive
+ * CSPs decideNudge would refuse to message again (nudge cap exhausted, or
+ * they asked us to stop). Same guardrail decision the daily job uses, not a
+ * separate rule.
+ */
+router.get("/non-responsive", async (_req, res) => {
+  try {
+    const records = await fetchRecords();
+    return res.json({ records: listNonResponsive(records) });
+  } catch (err) {
+    logger.error({ err }, "Failed to load non-responsive list");
+    return res.status(502).json({ error: "Failed to fetch data from Google Sheets" });
+  }
+});
+
+/**
+ * GET /api/geo-breakdown
+ * State- and district-wise inactivity breakdown for the heat map — ranked by
+ * inactivity rate, deduped case-insensitively (the sheet has the same place
+ * spelled with different casing in different rows).
+ */
+router.get("/geo-breakdown", async (_req, res) => {
+  try {
+    const records = await fetchRecords();
+    return res.json(getGeoBreakdown(records));
+  } catch (err) {
+    logger.error({ err }, "Failed to build geo breakdown");
+    return res.status(502).json({ error: "Failed to fetch data from Google Sheets" });
+  }
+});
+
+/**
+ * GET /api/rm-dc-performance
+ * Per-RM and per-DC recovery performance: how many CSPs are currently
+ * inactive under them, how many they've recovered in the trailing 30 days,
+ * average days-to-recovery, and an efficiency % (recovered / (recovered +
+ * currently inactive)) — the same recipe as the global recoveryRate, scoped
+ * per person. Pure arithmetic over recovery_log + the roster, no AI.
+ */
+router.get("/rm-dc-performance", async (_req, res) => {
+  try {
+    const records = await fetchRecords();
+    return res.json(getRmDcPerformance(records));
+  } catch (err) {
+    logger.error({ err }, "Failed to build RM/DC performance report");
+    return res.status(502).json({ error: "Failed to fetch data from Google Sheets" });
+  }
+});
+
+/**
+ * GET /api/insights/summary
+ * A plain-English daily readout, assembled by template from real numbers —
+ * NOT an LLM call. See insights.service.ts / SKILLS.md.
+ */
+router.get("/insights/summary", async (_req, res) => {
+  try {
+    const records = await fetchRecords();
+    const [geo, changes] = [getGeoBreakdown(records), getDailyChanges()];
+    const nonResponsive = countNonResponsive(records);
+    return res.json(getDailySummary(records, geo, nonResponsive, changes.newlyInactive.length));
+  } catch (err) {
+    logger.error({ err }, "Failed to build daily summary");
+    return res.status(502).json({ error: "Failed to fetch data from Google Sheets" });
+  }
+});
+
+/**
+ * GET /api/insights/recommendations
+ * Rule-based next-action suggestion per currently-inactive CSP (visit vs.
+ * keep calling) — reuses decideNudge's own decision plus a disclosed
+ * repeat-offender count. Not an LLM call.
+ */
+router.get("/insights/recommendations", async (_req, res) => {
+  try {
+    const records = await fetchRecords();
+    return res.json({ recommendations: getRecommendations(records) });
+  } catch (err) {
+    logger.error({ err }, "Failed to build recommendations");
+    return res.status(502).json({ error: "Failed to fetch data from Google Sheets" });
+  }
+});
+
+/**
+ * GET /api/insights/at-risk
+ * Early warning for currently-healthy CSPs (0-2 days) trending toward the
+ * 3-day threshold or with a relapse history — two disclosed rules, not a
+ * statistical/ML model.
+ */
+router.get("/insights/at-risk", async (_req, res) => {
+  try {
+    const records = await fetchRecords();
+    return res.json({ atRisk: getAtRiskCsps(records) });
+  } catch (err) {
+    logger.error({ err }, "Failed to build at-risk list");
+    return res.status(502).json({ error: "Failed to fetch data from Google Sheets" });
+  }
+});
+
 const dailyChangesQuerySchema = z.object({
   day: z
     .string()
@@ -128,6 +238,164 @@ router.get("/adaptive-tuning", (_req, res) => {
   } catch (err) {
     logger.error({ err }, "Failed to load adaptive tuning report");
     return res.status(500).json({ error: "Failed to load adaptive tuning report" });
+  }
+});
+
+/**
+ * GET /api/settings
+ * The effective runtime configuration: saved dashboard overrides layered on
+ * the .env defaults (settings.service.ts). Always returns a complete object,
+ * never a partial one, so the settings form can render straight from it.
+ */
+router.get("/settings", (_req, res) => {
+  try {
+    return res.json(getSettings());
+  } catch (err) {
+    logger.error({ err }, "Failed to load settings");
+    return res.status(500).json({ error: "Failed to load settings" });
+  }
+});
+
+/**
+ * Every field is optional — a save writes only what it sends, so one panel
+ * can never clobber a key it doesn't show. Bounds are deliberately narrow
+ * and enforced HERE rather than in the UI alone: these numbers decide who
+ * gets messaged and how often, and a 0-day cooldown or a 500-nudge cap
+ * typed into a raw POST would be a real harm, not just a bad form entry.
+ */
+const settingsSchema = z
+  .object({
+    emailEnabled: z.boolean(),
+    whatsappEnabled: z.boolean(),
+    inactivityThresholdDays: z.number().int("Must be a whole number of days").min(1).max(365),
+    targetInactivityRate: z.number().min(0).max(100),
+    cspMaxNudges: z.number().int("Must be a whole number of nudges").min(1).max(10),
+    cspNudgeCooldownDays: z.number().int("Must be a whole number of days").min(1).max(30),
+  })
+  .partial()
+  .strict();
+
+/**
+ * POST /api/settings
+ * Saves configuration overrides and returns the full effective settings.
+ * Saving the nudge cap also clears the adaptively-tuned value, so the number
+ * the operator just typed is the one actually in force (see
+ * resetTunedMaxNudges) rather than being silently overridden by tuning_state.
+ */
+router.post("/settings", (req, res) => {
+  const parsed = settingsSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    // The whole flatten(), not just fieldErrors: a rejected unknown key lands
+    // in formErrors, and reporting only fieldErrors would answer that with a
+    // bare `{}` — a 400 with no stated reason.
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+  if (Object.keys(parsed.data).length === 0) {
+    return res.status(400).json({ error: "No settings supplied." });
+  }
+
+  try {
+    const saved = updateSettings(parsed.data);
+    if (parsed.data.cspMaxNudges !== undefined) resetTunedMaxNudges();
+    logger.info({ changed: Object.keys(parsed.data) }, "Dashboard settings updated");
+    return res.json(saved);
+  } catch (err) {
+    logger.error({ err }, "Failed to save settings");
+    return res.status(500).json({ error: "Failed to save settings" });
+  }
+});
+
+/**
+ * GET /api/templates
+ * Every outbound message template — its current effective text (saved
+ * override, else the built-in default), plus the metadata the frontend needs
+ * to render an editor safely: which placeholders are required, sample values
+ * for a live preview, and whether it's locked behind an approved WhatsApp
+ * business template (see templates.service.ts's file-level note).
+ */
+router.get("/templates", (_req, res) => {
+  try {
+    return res.json({ templates: getAllTemplates() });
+  } catch (err) {
+    logger.error({ err }, "Failed to load templates");
+    return res.status(500).json({ error: "Failed to load templates" });
+  }
+});
+
+const templatesSchema = z
+  .object({}) // keys are dynamic (template keys) — validated against the registry below, not by zod shape
+  .catchall(z.string())
+  .refine((obj) => Object.keys(obj).length > 0, { message: "No templates supplied." });
+
+/**
+ * POST /api/templates
+ * Saves one or more templates by key. Rejects (400) any value that has
+ * dropped a placeholder its renderer depends on (e.g. removing {{days}} from
+ * the CSP WhatsApp nudge) — a silently broken message is worse than a
+ * rejected save. Unknown keys are also rejected rather than silently stored.
+ */
+router.post("/templates", (req, res) => {
+  const parsed = templatesSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+  try {
+    updateTemplates(parsed.data);
+    logger.info({ changed: Object.keys(parsed.data) }, "Message templates updated");
+    return res.json({ templates: getAllTemplates() });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to save templates";
+    logger.error({ err }, "Failed to save templates");
+    return res.status(400).json({ error: message });
+  }
+});
+
+/** POST /api/templates/:key/reset - drops the saved override, reverting to the built-in default. */
+router.post("/templates/:key/reset", (req, res) => {
+  try {
+    resetTemplate(req.params.key);
+    return res.json({ templates: getAllTemplates() });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to reset template";
+    return res.status(400).json({ error: message });
+  }
+});
+
+/**
+ * GET /api/message-reach[?jobRunId=]
+ * How many CSPs were messaged directly, and how many distinct RMs/DCs were
+ * reached (each counted once no matter how many CSPs they cover) — with the
+ * full per-recipient breakdown for drill-down. Defaults to the most recent
+ * run, same convention as /api/delivery-summary.
+ */
+router.get("/message-reach", (req, res) => {
+  const raw = req.query.jobRunId;
+  if (raw !== undefined) {
+    const jobRunId = Number(raw);
+    if (!Number.isInteger(jobRunId) || jobRunId <= 0) {
+      return res.status(400).json({ error: "jobRunId must be a positive integer" });
+    }
+    return res.json(getMessageReach(jobRunId));
+  }
+  return res.json(getMessageReach());
+});
+
+/**
+ * POST /api/csps/:cspCode/nudge
+ * A deliberate, human-initiated single-CSP nudge — sends the real WhatsApp
+ * reminder to just this one CSP right now, bypassing the automated
+ * cadence/cap (but never the terminal-active / suppressed-by-reply safety
+ * rules). The frontend gates this behind its own confirm step; this route
+ * itself does not — same pattern as /job-runs/trigger.
+ */
+router.post("/csps/:cspCode/nudge", async (req, res) => {
+  const cspCode = req.params.cspCode;
+  try {
+    const result = await sendOneOffNudge(cspCode, new Date().toISOString());
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (err) {
+    logger.error({ err, cspCode }, "One-off nudge request failed");
+    return res.status(500).json({ success: false, cspCode, personName: "", error: "Nudge failed unexpectedly." });
   }
 });
 

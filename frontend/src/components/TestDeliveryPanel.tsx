@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { runTestDelivery } from "../api/client";
 import type { TestChannelResult, TestDeliveryResult } from "../types";
+import Panel from "./Panel";
 
 type Phase = "idle" | "running" | "done" | "error";
 
@@ -39,13 +40,14 @@ export default function TestDeliveryPanel() {
   };
 
   return (
-    <section className="panel test-panel">
-      <div className="panel__header">
-        <h2>
+    <Panel
+      title={
+        <>
           <span aria-hidden="true">🧪</span> Test delivery
-        </h2>
-        <span className="test-panel__tag">Diagnostic only — no CSP/RM/DC is contacted</span>
-      </div>
+        </>
+      }
+      subtitle={<span className="test-panel__tag">Diagnostic only — no CSP/RM/DC is contacted</span>}
+    >
       <p className="test-panel__intro">
         Send a sample message to a contact of your choice to confirm email and WhatsApp delivery are
         working. This does not read the spreadsheet or send any real alerts — use it whenever you
@@ -91,7 +93,7 @@ export default function TestDeliveryPanel() {
           <ChannelResult label="WhatsApp" res={result.whatsapp} />
         </div>
       )}
-    </section>
+    </Panel>
   );
 }
 

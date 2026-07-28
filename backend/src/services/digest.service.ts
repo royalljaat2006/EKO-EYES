@@ -1,13 +1,22 @@
 import crypto from "node:crypto";
 import env from "../config/env";
 import logger from "../utils/logger";
-import { NotificationChannel, NotificationOutcome, NotificationRole } from "../types";
+import { InactivityRecord, NotificationChannel, NotificationOutcome, NotificationRole } from "../types";
 import { EvaluatedPerson } from "./escalation.service";
 import { sendDigestEmail } from "./email.service";
 import { sendDigestWhatsApp } from "./whatsapp/whatsapp.service";
 import { TIERS } from "../config/escalation";
 import { NudgeDecision } from "./cspEngagement.service";
 import { isPlaceholderAssignee } from "../utils/placeholder";
+import { getBoolSetting, getNumberSetting } from "./settings.service";
+import { getTemplate, renderTemplate } from "./templates.service";
+
+const TIER_HEADLINE_TEMPLATE_KEY: Record<string, string> = {
+  self: "tierHeadlineSelf",
+  breach: "tierHeadlineBreach",
+  escalated: "tierHeadlineEscalated",
+  critical: "tierHeadlineCritical",
+};
 
 export interface DigestTarget {
   role: NotificationRole;
@@ -136,6 +145,7 @@ export function findUnreachable(people: EvaluatedPerson[]): NotificationOutcome[
         channel: "email",
         role,
         recipient: name ? `${name} (no contact on file)` : `(no ${role} assigned)`,
+        recipientName: name || null,
         personName: p.record.targetPersonName,
         days: p.record.days ?? 0,
         success: false,
@@ -162,15 +172,12 @@ export function findUnreachable(people: EvaluatedPerson[]): NotificationOutcome[
  * also offered no way to reply. Both were wrong. This version asks whether they
  * are OK and gives them a way to answer.
  */
-export function renderCspMessage(p: EvaluatedPerson): string {
-  const days = p.record.days ?? 0;
-  return (
-    `Hello ${p.record.targetPersonName}, we noticed your CSP terminal (${p.record.cspCode}) ` +
-    `has not been used for ${days} days. Is everything OK? ` +
-    `If you are facing any issue — device problem, shop closed, or anything else — ` +
-    `reply HELP and our team will call you. ` +
-    `If all is well, a single transaction today will bring your terminal back to active.`
-  );
+export function renderCspMessage(record: InactivityRecord): string {
+  return renderTemplate(getTemplate("cspWhatsapp"), {
+    name: record.targetPersonName,
+    cspCode: record.cspCode,
+    days: record.days ?? 0,
+  });
 }
 
 export function renderDigestText(target: DigestTarget, decisions: NudgeDecisions): string {
@@ -200,7 +207,8 @@ export function renderDigestText(target: DigestTarget, decisions: NudgeDecisions
     const group = target.people.filter((p) => p.policy.tier === policy.tier);
     if (group.length === 0) continue;
 
-    lines.push(`${policy.label.toUpperCase()} — ${policy.headline}`);
+    const headline = getTemplate(TIER_HEADLINE_TEMPLATE_KEY[policy.tier]);
+    lines.push(`${policy.label.toUpperCase()} — ${headline}`);
     for (const p of group) {
       lines.push(
         `  • ${p.record.targetPersonName} (${p.record.cspCode}) — ${p.record.days} days inactive`,
@@ -237,7 +245,7 @@ export function renderDigestText(target: DigestTarget, decisions: NudgeDecisions
   }
 
   lines.push(
-    `Target: keep inactivity at or below ${env.TARGET_INACTIVITY_RATE}%.`,
+    `Target: keep inactivity at or below ${getNumberSetting("targetInactivityRate")}%.`,
     ``,
     `-- E.Y.E.S. (EKO Yield & Escalation System)`,
   );
@@ -254,12 +262,11 @@ export function renderDigestText(target: DigestTarget, decisions: NudgeDecisions
  * regex in goinfinitoWhatsApp.provider.ts.
  */
 export function renderRoleCspWhatsApp(recipientName: string, p: EvaluatedPerson): string {
-  const days = p.record.days ?? 0;
-  const who = recipientName.trim() || "there";
-  return (
-    `Hello ${who}, we noticed your CSP terminal (${p.record.cspCode}) ` +
-    `has not been used for ${days} days.`
-  );
+  return renderTemplate(getTemplate("roleCspWhatsapp"), {
+    recipientName: recipientName.trim() || "there",
+    cspCode: p.record.cspCode,
+    days: p.record.days ?? 0,
+  });
 }
 
 /**
@@ -270,7 +277,7 @@ export function buildWhatsAppMessages(
   target: DigestTarget,
 ): { text: string; person: EvaluatedPerson }[] {
   if (target.role === "CSP") {
-    return [{ text: renderCspMessage(target.people[0]), person: target.people[0] }];
+    return [{ text: renderCspMessage(target.people[0].record), person: target.people[0] }];
   }
   return target.people.map((p) => ({
     text: renderRoleCspWhatsApp(target.name, p),
@@ -292,6 +299,27 @@ export async function sendDigests(
 ): Promise<NotificationOutcome[]> {
   const outcomes: NotificationOutcome[] = [];
 
+  // The operator kill switches (settings.service.ts). Read ONCE per run, not
+  // per target, so a save landing mid-run can't send half the digests under
+  // one setting and half under another. A disabled channel is skipped
+  // entirely and logged — deliberately NOT recorded as a failed outcome,
+  // because "we chose not to send" is not a delivery problem and shouldn't
+  // show up red in the delivery dashboard.
+  const emailEnabled = getBoolSetting("emailEnabled");
+  const whatsappEnabled = getBoolSetting("whatsappEnabled");
+  if (!emailEnabled) {
+    logger.warn(
+      { targets: targets.length },
+      "Email dispatch SKIPPED — email alerts are disabled in dashboard settings",
+    );
+  }
+  if (!whatsappEnabled) {
+    logger.warn(
+      { targets: targets.length },
+      "WhatsApp dispatch SKIPPED — WhatsApp alerts are disabled in dashboard settings",
+    );
+  }
+
   for (const target of targets) {
     const channels = channelsFor(target);
     const names = target.people.map((p) => ({
@@ -302,7 +330,7 @@ export async function sendDigests(
     const emailTo = target.email;
     const mobileTo = target.mobile;
 
-    if (channels.includes("email") && emailTo) {
+    if (emailEnabled && channels.includes("email") && emailTo) {
       const emailMessageId = crypto.randomUUID();
       try {
         await sendDigestEmail(emailTo, target.role, renderDigestText(target, decisions), emailMessageId);
@@ -311,6 +339,7 @@ export async function sendDigests(
             channel: "email",
             role: target.role,
             recipient: emailTo,
+            recipientName: target.name,
             ...n,
             success: true,
             messageId: emailMessageId,
@@ -325,6 +354,7 @@ export async function sendDigests(
             channel: "email",
             role: target.role,
             recipient: emailTo,
+            recipientName: target.name,
             ...n,
             success: false,
             error,
@@ -335,7 +365,7 @@ export async function sendDigests(
       }
     }
 
-    if (channels.includes("whatsapp") && mobileTo) {
+    if (whatsappEnabled && channels.includes("whatsapp") && mobileTo) {
       // One WhatsApp per CSP for RM/DC (the approved template is single-CSP);
       // exactly one for a CSP recipient. Each message is recorded on its own so
       // a single CSP failing does not mask the others.
@@ -345,11 +375,16 @@ export async function sendDigests(
           days: wa.person.record.days ?? 0,
         };
         try {
-          const messageId = await sendDigestWhatsApp(mobileTo, wa.text);
+          const messageId = await sendDigestWhatsApp(mobileTo, wa.text, {
+            name: wa.person.record.targetPersonName,
+            cspCode: wa.person.record.cspCode,
+            days: wa.person.record.days ?? 0,
+          });
           outcomes.push({
             channel: "whatsapp",
             role: target.role,
             recipient: mobileTo,
+            recipientName: target.name,
             ...person,
             success: true,
             messageId: typeof messageId === "string" ? messageId : null,
@@ -362,6 +397,7 @@ export async function sendDigests(
             channel: "whatsapp",
             role: target.role,
             recipient: mobileTo,
+            recipientName: target.name,
             ...person,
             success: false,
             error,

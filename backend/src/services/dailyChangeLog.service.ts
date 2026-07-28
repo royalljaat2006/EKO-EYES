@@ -8,10 +8,18 @@ import { Tier } from "../config/escalation";
  * named CSP went active -> inactive on which day, so the dashboard can answer
  * "who specifically changed today," not just "how many."
  *
- * Reviewed daily by dailyJob.ts: every run diffs today's evaluated roster
- * against yesterday's `person_state` (already-existing logic in
- * escalation.service.ts) and calls `recordInactivityOnset` for each CSP that
- * crossed from active into a tier for the first time.
+ * Written once per day by dailyJob.ts, which diffs today's roster against
+ * YESTERDAY'S IMMUTABLE SNAPSHOT (dailySnapshot.service.ts) — not against
+ * live `person_state`, which the per-minute refresh used to overwrite before
+ * the comparison could happen.
+ *
+ * Two kinds of row, told apart by `is_new_csp`:
+ *  - 0 — a real transition: healthy yesterday, flagged today.
+ *  - 1 — a roster addition that arrived ALREADY flagged. Nothing changed
+ *    about this person; we simply started seeing them. Counting these as
+ *    "newly inactive" would make a sheet import look like a mass outbreak,
+ *    so they are surfaced as their own list and excluded from the count and
+ *    from repeat-offender history.
  */
 
 db.exec(`
@@ -25,12 +33,31 @@ db.exec(`
   );
 `);
 
+// Added after the table shipped, so it's a migration. Existing rows predate the
+// distinction and were all real transitions, so defaulting to 0 is correct.
+// SQLite has no "ADD COLUMN IF NOT EXISTS"; ignore the duplicate-column error.
+try {
+  db.exec(`ALTER TABLE inactivity_onset_log ADD COLUMN is_new_csp INTEGER NOT NULL DEFAULT 0`);
+} catch {
+  // Column already exists — fine.
+}
+
+// What the CSP's day-count was in yesterday's snapshot, for context in the UI
+// ("was 2d, now 4d"). Null for rows predating this column or for new CSPs.
+try {
+  db.exec(`ALTER TABLE inactivity_onset_log ADD COLUMN previous_days INTEGER`);
+} catch {
+  // Column already exists — fine.
+}
+
 export interface InactivityOnsetEntry {
   personName: string;
   cspCode: string;
   tier: Tier | null;
   days: number;
   onsetAt: string;
+  /** Their day-count in yesterday's snapshot — lets the UI show "was 2d, now 4d". Null when unknown. */
+  previousDays: number | null;
 }
 
 export interface RecoveryEntry {
@@ -43,22 +70,31 @@ export interface RecoveryEntry {
 export interface DailyChanges {
   /** YYYY-MM-DD this covers. */
   day: string;
+  /** Real transitions only: healthy yesterday, flagged today. */
   newlyInactive: InactivityOnsetEntry[];
+  /** Arrived in the sheet already flagged — a roster addition, deliberately NOT counted as a transition. */
+  newCspsAdded: InactivityOnsetEntry[];
   recovered: RecoveryEntry[];
 }
 
-/** Called once per CSP that just entered a tier for the first time (see dailyJob.ts step 2). */
+/**
+ * Called once per CSP that entered a tier today (see dailyJob.ts).
+ * `isNewCsp` marks the roster-addition case, which is reported separately
+ * from real transitions — see the note at the top of this file.
+ */
 export function recordInactivityOnset(
   personName: string,
   cspCode: string,
   tier: Tier | null,
   days: number,
   now: string,
+  isNewCsp = false,
+  previousDays: number | null = null,
 ): void {
   db.prepare(
-    `INSERT INTO inactivity_onset_log (person_name, csp_code, tier, days, onset_at)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(personName, cspCode, tier, days, now);
+    `INSERT INTO inactivity_onset_log (person_name, csp_code, tier, days, onset_at, is_new_csp, previous_days)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(personName, cspCode, tier, days, now, isNewCsp ? 1 : 0, previousDays);
 }
 
 /**
@@ -71,7 +107,7 @@ export function getDailyChanges(day?: string): DailyChanges {
 
   const onsetRows = db
     .prepare(
-      `SELECT person_name, csp_code, tier, days, onset_at
+      `SELECT person_name, csp_code, tier, days, onset_at, is_new_csp, previous_days
        FROM inactivity_onset_log
        WHERE date(onset_at) = date(?)
        ORDER BY days DESC`,
@@ -82,6 +118,8 @@ export function getDailyChanges(day?: string): DailyChanges {
     tier: Tier | null;
     days: number;
     onset_at: string;
+    is_new_csp: number;
+    previous_days: number | null;
   }[];
 
   const recoveryRows = db
@@ -98,15 +136,19 @@ export function getDailyChanges(day?: string): DailyChanges {
     recovered_at: string;
   }[];
 
+  const toOnset = (r: (typeof onsetRows)[number]): InactivityOnsetEntry => ({
+    personName: r.person_name,
+    cspCode: r.csp_code,
+    tier: r.tier,
+    days: r.days,
+    onsetAt: r.onset_at,
+    previousDays: r.previous_days,
+  });
+
   return {
     day: targetDay,
-    newlyInactive: onsetRows.map((r) => ({
-      personName: r.person_name,
-      cspCode: r.csp_code,
-      tier: r.tier,
-      days: r.days,
-      onsetAt: r.onset_at,
-    })),
+    newlyInactive: onsetRows.filter((r) => r.is_new_csp === 0).map(toOnset),
+    newCspsAdded: onsetRows.filter((r) => r.is_new_csp === 1).map(toOnset),
     recovered: recoveryRows.map((r) => ({
       personName: r.person_name,
       tierAtRecovery: r.tier_at_recovery,
@@ -114,4 +156,25 @@ export function getDailyChanges(day?: string): DailyChanges {
       recoveredAt: r.recovered_at,
     })),
   };
+}
+
+/**
+ * How many times each CSP has CROSSED from active into a tier, in the
+ * trailing window — feeds the rule-based "repeat offender" recommendation
+ * (insights.service.ts). Pure count over this table's own history, no
+ * inference beyond "this happened before."
+ *
+ * Excludes `is_new_csp` rows on purpose: first appearing in the sheet while
+ * already inactive is not a relapse, and counting it as one would label
+ * every newly-onboarded CSP a repeat offender on day one.
+ */
+export function getOnsetCounts(sinceDays = 90): Map<string, number> {
+  const rows = db
+    .prepare(
+      `SELECT csp_code, COUNT(*) AS c FROM inactivity_onset_log
+       WHERE onset_at >= datetime('now', ?) AND is_new_csp = 0
+       GROUP BY csp_code`,
+    )
+    .all(`-${sinceDays} days`) as { csp_code: string; c: number }[];
+  return new Map(rows.map((r) => [r.csp_code, r.c]));
 }

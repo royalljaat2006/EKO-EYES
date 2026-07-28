@@ -2,6 +2,7 @@ import db from "./alertStore.service";
 import env from "../config/env";
 import { InactivityRecord } from "../types";
 import { getEffectiveMaxNudges } from "./adaptiveTuning.service";
+import { getNumberSetting } from "./settings.service";
 
 /**
  * Guardrails on messaging a CSP directly.
@@ -102,8 +103,9 @@ export function decideNudge(
 
   // 3. Messaging has demonstrably failed. Escalate to a human, not another
   //    text. The cap itself is adaptively tuned within a fixed safety range
-  //    (adaptiveTuning.service.ts) — env.CSP_MAX_NUDGES is only the starting
-  //    point before any tuning history exists.
+  //    (adaptiveTuning.service.ts) — the configured cap (dashboard setting,
+  //    else env.CSP_MAX_NUDGES) is only the starting point before any tuning
+  //    history exists.
   if ((engagement?.nudgeCount ?? 0) >= getEffectiveMaxNudges()) return "nudge-cap-reached";
 
   // 4. Breathing room.
@@ -111,7 +113,7 @@ export function decideNudge(
     const daysSince = Math.floor(
       (now.getTime() - new Date(engagement.lastNudgedAt).getTime()) / DAY_MS,
     );
-    if (daysSince < env.CSP_NUDGE_COOLDOWN_DAYS) return "cooldown";
+    if (daysSince < getNumberSetting("cspNudgeCooldownDays")) return "cooldown";
   }
 
   return "send";

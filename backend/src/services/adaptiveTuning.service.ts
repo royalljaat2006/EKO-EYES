@@ -1,5 +1,5 @@
 import db from "./alertStore.service";
-import env from "../config/env";
+import { getNumberSetting } from "./settings.service";
 import logger from "../utils/logger";
 
 /**
@@ -65,12 +65,23 @@ export interface TuningReport {
   history: TuningEvaluation[];
 }
 
-/** The cap decideNudge should actually use right now — env.CSP_MAX_NUDGES until tuning has run at least once. */
+/** The cap decideNudge should actually use right now — the operator's configured cap until tuning has run at least once. */
 export function getEffectiveMaxNudges(): number {
   const row = db.prepare(`SELECT value FROM tuning_state WHERE param = ?`).get(PARAM) as
     | { value: number }
     | undefined;
-  return row?.value ?? env.CSP_MAX_NUDGES;
+  return row?.value ?? getNumberSetting("cspMaxNudges");
+}
+
+/**
+ * Drops the tuned value so the configured cap (dashboard setting, else
+ * env.CSP_MAX_NUDGES) is what's in effect again. Called when an operator
+ * saves the cap by hand: without this, tuning_state would keep quietly
+ * winning and the number they just typed would appear to do nothing. The
+ * loop then starts learning again from that new starting point.
+ */
+export function resetTunedMaxNudges(): void {
+  db.prepare(`DELETE FROM tuning_state WHERE param = ?`).run(PARAM);
 }
 
 function setMaxNudges(value: number, now: string): void {
@@ -182,7 +193,7 @@ export function getTuningReport(limit = 20): TuningReport {
     param: PARAM,
     currentValue: getEffectiveMaxNudges(),
     bounds: [MIN_CAP, MAX_CAP],
-    defaultValue: env.CSP_MAX_NUDGES,
+    defaultValue: getNumberSetting("cspMaxNudges"),
     history: rows.map((r) => ({
       id: r.id,
       param: r.param,

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchAdaptiveTuning } from "../api/client";
 import type { TuningReport } from "../types";
+import Panel from "./Panel";
 
 function formatWhen(iso: string): string {
   const d = new Date(iso);
@@ -34,14 +35,10 @@ export default function AdaptiveTuningPanel() {
   const latest = report.history[0];
 
   return (
-    <div className="panel">
-      <div className="panel__header">
-        <h2>Adaptive tuning</h2>
-        <span className="panel__subtitle">
-          The CSP nudge cap learns from recovery history &mdash; bounded, logged, never silent
-        </span>
-      </div>
-
+    <Panel
+      title="Adaptive tuning"
+      subtitle="The CSP nudge cap learns from recovery history — bounded, logged, never silent"
+    >
       <div className="tuning-summary">
         <div className="tuning-summary__value">
           <span className="tuning-summary__number">{report.currentValue}</span>
@@ -82,6 +79,6 @@ export default function AdaptiveTuningPanel() {
           ))}
         </ul>
       )}
-    </div>
+    </Panel>
   );
 }

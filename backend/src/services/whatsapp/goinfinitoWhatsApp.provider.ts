@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import axios from "axios";
 import env from "../../config/env";
 import logger from "../../utils/logger";
-import { WhatsAppProvider, normalizeMobile } from "./whatsapp.types";
+import { WhatsAppCspVars, WhatsAppProvider, normalizeMobile } from "./whatsapp.types";
 
 interface GoinfinitoResponse {
   status: string;
@@ -21,7 +21,7 @@ interface GoinfinitoResponse {
 export class GoinfinitoWhatsAppProvider implements WhatsAppProvider {
   private readonly url = "https://api.goinfinito.com/unified/v2/send";
 
-  async sendMessage(toMobile: string, message: string): Promise<string> {
+  async sendMessage(toMobile: string, message: string, cspVars?: WhatsAppCspVars): Promise<string> {
     // Normalize mobile numbers to digits only, removing the leading '+' for Goinfinito.
     const to = normalizeMobile(toMobile).replace("+", "");
     const from = normalizeMobile(env.CERF_FROM || "").replace("+", "");
@@ -29,20 +29,27 @@ export class GoinfinitoWhatsAppProvider implements WhatsAppProvider {
     // Generate a unique 24-character hex ID (12 bytes)
     const uniqueId = crypto.randomBytes(12).toString("hex");
 
-    // Parse variables for the 3-variable csp_inactivity_nudge template (ID 1778199)
-    // Format: Hello {{1}}, we noticed your CSP terminal ({{2}}) has not been used for {{3}} days.
-    const cspPattern = /Hello\s+(.+?),\s+we\s+noticed\s+your\s+CSP\s+terminal\s+\((.+?)\)\s+has\s+not\s+been\s+used\s+for\s+(\d+)\s+days/;
-    const match = message.match(cspPattern);
-
-    let templateParams = "";
-    if (match) {
-      const name = match[1].trim();
-      const cspCode = match[2].trim();
-      const days = match[3].trim();
-      templateParams = `${name}~${cspCode}~${days}`;
+    // The approved csp_inactivity_nudge template (ID 1778199) takes exactly
+    // 3 variables: name, CSP code, days. When the caller already has them
+    // (every real CSP-tier send does), use them DIRECTLY — this used to be
+    // recovered by regex-matching a hardcoded English sentence out of
+    // `message`, which meant editing that sentence's wording even slightly
+    // (a typo fix, a template edit, a translation) would silently break
+    // every outbound WhatsApp for however long it went unnoticed. The regex
+    // is now only a fallback for callers with no CSP context (e.g. the
+    // diagnostic test-delivery message).
+    let templateParams: string;
+    if (cspVars) {
+      templateParams = `${cspVars.name}~${cspVars.cspCode}~${cspVars.days}`;
     } else {
-      // Fallback for non-CSP messages or test messages
-      templateParams = `${message}~~`;
+      const cspPattern = /Hello\s+(.+?),\s+we\s+noticed\s+your\s+CSP\s+terminal\s+\((.+?)\)\s+has\s+not\s+been\s+used\s+for\s+(\d+)\s+days/;
+      const match = message.match(cspPattern);
+      if (match) {
+        const [, name, cspCode, days] = match;
+        templateParams = `${name.trim()}~${cspCode.trim()}~${days.trim()}`;
+      } else {
+        templateParams = `${message}~~`;
+      }
     }
 
     const payload = {

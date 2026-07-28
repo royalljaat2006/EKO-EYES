@@ -3,6 +3,10 @@ import type { InactivityRecord } from "../types";
 import { RANGE_OPTIONS as BASE_RANGE_OPTIONS, RANGE_LABELS, inRange as inBucket } from "../rangeOptions";
 import type { RangeOption } from "../rangeOptions";
 import { statusOf, STATUS_META } from "../statusOptions";
+import { usePagination } from "../usePagination";
+import Panel from "./Panel";
+import Pager from "./Pager";
+import RowActions from "./RowActions";
 
 type StatusFilter = "all" | "inactive" | "at-risk" | "healthy" | "unknown";
 
@@ -11,7 +15,7 @@ const PAGE_SIZE = 50;
 const STATUS_TABS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "inactive", label: "Inactive (>7d)" },
-  { value: "at-risk", label: "Self-nudge (3–7d)" },
+  { value: "at-risk", label: "3–7d" },
   { value: "healthy", label: "Healthy (<3d)" },
   { value: "unknown", label: "Unmeasurable" },
 ];
@@ -37,7 +41,6 @@ export default function AllCspsTable({ records }: Props) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [range, setRange] = useState<RangeFilter>("all");
-  const [page, setPage] = useState(0);
 
   const counts = useMemo(() => {
     const c = { all: records.length, inactive: 0, "at-risk": 0, healthy: 0, unknown: 0 };
@@ -65,26 +68,23 @@ export default function AllCspsTable({ records }: Props) {
     });
   }, [records, query, status, range]);
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const safePage = Math.min(page, pageCount - 1);
-  const visible = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
+  const { page, pageCount, visible, setPage, resetPage } = usePagination(filtered, PAGE_SIZE);
 
   const reset = (fn: () => void) => {
     fn();
-    setPage(0);
+    resetPage();
   };
 
   return (
-    <div className="panel">
-      <div className="panel__header">
-        <h2>All CSPs</h2>
-        <span className="panel__subtitle">
-          {filtered.length === records.length
-            ? `${records.length} total`
-            : `${filtered.length} of ${records.length}`}
-        </span>
-      </div>
-
+    <Panel
+      title="All CSPs"
+      focusable
+      subtitle={
+        filtered.length === records.length
+          ? `${records.length} total`
+          : `${filtered.length} of ${records.length}`
+      }
+    >
       <div className="roster-controls">
         <div className="roster-tabs" role="group" aria-label="Filter CSPs by status">
           {STATUS_TABS.map((t) => (
@@ -143,6 +143,7 @@ export default function AllCspsTable({ records }: Props) {
               <th>DC Email</th>
               <th>DC Mobile</th>
               <th>Last Login</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -150,7 +151,7 @@ export default function AllCspsTable({ records }: Props) {
               const pill = STATUS_META[statusOf(r)];
               return (
                 <tr key={r.sourceRow}>
-                  <td className="num">{safePage * PAGE_SIZE + i + 1}</td>
+                  <td className="num">{page * PAGE_SIZE + i + 1}</td>
                   <td className="num">{r.cspCode || "—"}</td>
                   <td>{r.targetPersonName}</td>
                   <td className="num">{r.days ?? "—"}</td>
@@ -168,12 +169,15 @@ export default function AllCspsTable({ records }: Props) {
                   <td>{r.dc?.email || "—"}</td>
                   <td className="num">{r.dc?.mobile || "—"}</td>
                   <td className="num">{r.lastLoginDate ?? "—"}</td>
+                  <td>
+                    <RowActions record={r} />
+                  </td>
                 </tr>
               );
             })}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={14} className="empty-state">
+                <td colSpan={15} className="empty-state">
                   No CSPs match this filter.
                 </td>
               </tr>
@@ -182,29 +186,14 @@ export default function AllCspsTable({ records }: Props) {
         </table>
       </div>
 
-      {pageCount > 1 && (
-        <div className="pager">
-          <button
-            type="button"
-            className="pager__button"
-            onClick={() => setPage(safePage - 1)}
-            disabled={safePage === 0}
-          >
-            ‹ Prev
-          </button>
-          <span className="pager__label">
-            Page {safePage + 1} of {pageCount} · showing {visible.length} of {filtered.length}
-          </span>
-          <button
-            type="button"
-            className="pager__button"
-            onClick={() => setPage(safePage + 1)}
-            disabled={safePage >= pageCount - 1}
-          >
-            Next ›
-          </button>
-        </div>
-      )}
-    </div>
+      <Pager
+        page={page}
+        pageCount={pageCount}
+        visibleCount={visible.length}
+        totalCount={filtered.length}
+        onPrev={() => setPage(page - 1)}
+        onNext={() => setPage(page + 1)}
+      />
+    </Panel>
   );
 }

@@ -10,6 +10,7 @@ import {
 import type { TooltipContentProps } from "recharts";
 import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import type { RmGroupSummary } from "../types";
+import Panel from "./Panel";
 
 interface Props {
   data: RmGroupSummary[];
@@ -31,22 +32,14 @@ function CustomTooltip({ active, payload }: TooltipContentProps<ValueType, NameT
 export default function SummaryChart({ data, thresholdLabel }: Props) {
   if (data.length === 0) {
     return (
-      <div className="panel">
-        <div className="panel__header">
-          <h2>Inactive personnel by RM</h2>
-          <span className="panel__subtitle">{thresholdLabel}</span>
-        </div>
+      <Panel title="Inactive personnel by RM" subtitle={thresholdLabel} focusable>
         <p className="empty-state">No inactive personnel at this threshold.</p>
-      </div>
+      </Panel>
     );
   }
 
   return (
-    <div className="panel">
-      <div className="panel__header">
-        <h2>Inactive personnel by RM</h2>
-        <span className="panel__subtitle">{thresholdLabel}</span>
-      </div>
+    <Panel title="Inactive personnel by RM" subtitle={thresholdLabel} focusable>
       <ResponsiveContainer width="100%" height={320}>
         <BarChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
           <CartesianGrid vertical={false} stroke="var(--gridline)" />
@@ -71,6 +64,6 @@ export default function SummaryChart({ data, thresholdLabel }: Props) {
           <Bar dataKey="count" fill="var(--series-1)" radius={[4, 4, 0, 0]} maxBarSize={48} />
         </BarChart>
       </ResponsiveContainer>
-    </div>
+    </Panel>
   );
 }

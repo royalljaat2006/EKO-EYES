@@ -3,7 +3,7 @@ import { InactivityRecord, NotificationRole } from "../../types";
 import { MetaWhatsAppProvider } from "./metaWhatsApp.provider";
 import { TwilioWhatsAppProvider } from "./twilioWhatsApp.provider";
 import { GoinfinitoWhatsAppProvider } from "./goinfinitoWhatsApp.provider";
-import { WhatsAppProvider } from "./whatsapp.types";
+import { WhatsAppCspVars, WhatsAppProvider } from "./whatsapp.types";
 
 let provider: WhatsAppProvider | null = null;
 
@@ -27,10 +27,20 @@ export function buildWhatsAppAlertText(record: InactivityRecord, role: Notificat
   );
 }
 
-/** One consolidated WhatsApp digest to a single recipient. */
-export async function sendDigestWhatsApp(mobile: string, message: string): Promise<string | void> {
+/**
+ * One consolidated WhatsApp digest to a single recipient. `cspVars` should be
+ * passed whenever the message concerns one specific CSP (every real tier
+ * message does) — see WhatsAppCspVars for why: it lets an approved-template
+ * provider fill its variables directly instead of parsing them back out of
+ * `message`, so editing the message wording can never break delivery.
+ */
+export async function sendDigestWhatsApp(
+  mobile: string,
+  message: string,
+  cspVars?: WhatsAppCspVars,
+): Promise<string | void> {
   if (!mobile) throw new Error("Missing mobile number for WhatsApp digest");
-  return await getProvider().sendMessage(mobile, message);
+  return await getProvider().sendMessage(mobile, message, cspVars);
 }
 
 export async function sendAlertWhatsApp(

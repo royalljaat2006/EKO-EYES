@@ -30,6 +30,10 @@ export interface InactivityRecord {
   lhoName: string;
   lhoEmail: string;
 
+  /** Geography, browse-only (not alerted) — feeds the state/district heat map. */
+  state: string;
+  district: string;
+
   terminalStatus: string;
   lastLoginDate: string | null;
 
@@ -60,6 +64,8 @@ export interface NotificationOutcome {
   channel: NotificationChannel;
   role: NotificationRole;
   recipient: string;
+  /** The human name behind `recipient` (the RM/DC/CSP's own name) — `recipient` alone is only an email/mobile, not something a person recognizes. Null when there's no name to attach (e.g. a bare Manager/Leadership/Support email list entry). */
+  recipientName?: string | null;
   personName: string;
   days: number;
   success: boolean;
@@ -108,6 +114,12 @@ export interface KpiReport {
   /** Rows we could not measure ("No transaction data"). */
   unknownPeople: number;
   atRisk: number;
+  /**
+   * Currently-inactive CSPs who've exhausted their nudge cap or explicitly
+   * asked us to stop, and haven't recovered since — reuses decideNudge's own
+   * "nudge-cap-reached"/"suppressed-by-reply" outcomes, not a new heuristic.
+   */
+  nonResponsive: number;
   /** People who returned to active in the trailing window */
   recoveries: number;
   newBreaches: number;
@@ -127,6 +139,7 @@ export interface DeliveryAttempt {
   channel: NotificationChannel;
   role: NotificationRole;
   recipient: string;
+  recipientName?: string | null;
   success: boolean;
   error: string | null;
   messageId?: string | null;

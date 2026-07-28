@@ -44,6 +44,8 @@ type Field =
   | "dcMobile"
   | "lhoName"
   | "lhoEmail"
+  | "state"
+  | "district"
   | "terminalStatus"
   | "inactivityDays"
   | "lastLoginDate";
@@ -65,6 +67,8 @@ const MATCHERS: Record<Field, (h: string) => boolean> = {
   dcMobile: (h) => h.startsWith("mobile number dc") || h.startsWith("mobile no of dc"),
   lhoName: (h) => h === "circle (lho)",
   lhoEmail: (h) => h.startsWith("lho mail"),
+  state: (h) => h === "state",
+  district: (h) => h === "district",
   terminalStatus: (h) => h === "terminal status",
   inactivityDays: (h) => h.startsWith("inactivity days"),
   lastLoginDate: (h) => h.startsWith("last login"),
@@ -174,6 +178,8 @@ function buildRecord(
     dc,
     lhoName: cellText(at(row, cols.lhoName)),
     lhoEmail: cellText(at(row, cols.lhoEmail)),
+    state: cellText(at(row, cols.state)),
+    district: cellText(at(row, cols.district)),
     terminalStatus: cellText(at(row, cols.terminalStatus)),
     lastLoginDate: parseLastLogin(at(row, cols.lastLoginDate)),
     sourceRow,

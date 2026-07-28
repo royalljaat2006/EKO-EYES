@@ -33,6 +33,146 @@ Every daily run (`backend/src/jobs/dailyJob.ts`) follows this exact order:
 separation of tiering/guardrails/sending into distinct steps is what makes each
 piece independently testable and auditable.
 
+### Tabbed workspace redesign — the shared Panel wrapper
+
+The dashboard went from one ~15-panel vertical scroll to 4 tabs (Overview /
+Smart Insights / Analytics & Performance / System Control & Audit,
+`WorkspaceTabs.tsx`) plus a shared `Panel.tsx` wrapper every panel component
+renders through. Reuse this shape for any future panel:
+
+- **`Panel` owns the chrome, not each component.** Title, subtitle,
+  `headerExtra` (chart-controls-style toggles), a collapse toggle (default
+  on), and an opt-in full-screen focus toggle (`focusable` — only chart/
+  table-shaped panels: KpiPanel, SummaryChart, DataTable, AllCspsTable,
+  FilteredResultsPanel, GeoHeatMap, RmDcPerformancePanel, TopCriticalPanel,
+  DeliveryPanel). List-shaped panels (DailySummaryPanel, RecommendationsPanel,
+  AtRiskPanel, DailyChangesPanel, AdaptiveTuningPanel, TestDeliveryPanel)
+  get collapse only.
+- **Focus mode repositions the SAME element, never teleports children.**
+  `.panel--focused` is `position: fixed; inset: 24px` applied directly to
+  the existing `.panel` div — not a second overlay tree with `{children}`
+  rendered twice. A panel with its own internal `useEffect` fetch (every
+  chart/table panel here has one) would double-fetch and desync its own
+  local toggle state if children were duplicated into two mounted
+  instances. If you need a new focus-mode panel, wrap with `<Panel
+  focusable>`, don't roll your own overlay.
+- **Tabs unmount inactive content.** `{activeTab === "x" && (...)}` — panels
+  on other tabs aren't just hidden, they're unmounted, so switching tabs
+  re-fetches. Traded deliberately for not keeping 15 components' fetch
+  intervals/state alive at once; if a panel's fetch becomes expensive,
+  that's the tradeoff to revisit first.
+- **Executive toolbar + ticker + quick filters are computed in `App.tsx`,
+  not fetched separately per widget.** `nonResponsiveRecords`/
+  `atRiskEntries`/`dailyChanges` are fetched ONCE at the App level (not
+  per-click) specifically so the ticker and the 5 quick-filter presets can
+  combine them synchronously without redundant round-trips. The existing
+  per-tile click-to-fetch pattern (e.g. the old Non-Responsive stat tile)
+  was replaced with reads from this lifted state.
+- **Quick filters and row clicks share the exact same `cardDetail` slot** —
+  "Top Critical" from the quick-filter bar and clicking the tier chip in
+  KpiPanel produce the identical `FilteredResultsPanel` render. Never add a
+  second display mechanism for "here's a filtered list."
+
+### Row actions — the one send-capable one is gated, the other two aren't
+
+`RowActions.tsx` (Copy Mobile / Contact Card / One-off Nudge) is used in
+all 4 tables (DataTable, AllCspsTable, FilteredResultsPanel,
+TopCriticalPanel). Only ONE of the three is capable of a real side effect,
+and it's treated completely differently from the other two:
+
+- **Copy Mobile** (clipboard) and **Contact Card** (a read-only RM/DC info
+  popover) fire immediately on click — no confirm needed, nothing sent.
+- **One-off Nudge** sends a REAL WhatsApp to that one CSP, right now. It is
+  gated behind its own confirm dialog (same idle → confirm → sending →
+  result phase pattern as `TriggerRunButton.tsx`'s "Run alerts now") —
+  never wire a send-capable action to a bare `onClick`.
+- Backend: `POST /api/csps/:cspCode/nudge` → `oneOffNudge.service.ts`. This
+  is a deliberate **operator override** of the automated cadence/nudge-cap
+  guardrails (that's the whole point of a manual "send this one now"
+  button) — but it never bypasses the two HARD safety rules: dead terminal
+  (physically can't respond) and suppressed-by-reply (explicitly asked to
+  stop). Cooldown and nudge-cap are the only guardrails it overrides.
+  `renderCspMessage()` (`digest.service.ts`) was refactored to take a plain
+  `InactivityRecord` instead of `EvaluatedPerson` specifically so this
+  single-CSP path could reuse the exact same message template as the real
+  daily digest, rather than duplicating the copy.
+- **Never test this against the live trigger or by actually confirming a
+  send** — same rule as `POST /api/job-runs/trigger`, see
+  `feedback_no_live_trigger_for_testing` in memory. Verify the confirm
+  dialog's content and that Cancel dismisses it; never click "Yes, send now"
+  outside a real, user-authorized send.
+
+### The "AI" features, minus the AI: insights.service.ts
+
+After the ops-analytics layer above, the user asked: "if you can do any of
+[AI Daily Summary / AI Recommendations / AI Risk Prediction] without an
+external LLM, go ahead." All three turned out to be feasible as disclosed
+if/else rules over data already collected — `backend/src/services/
+insights.service.ts` is all three, and none of them call out to a model:
+
+- **Daily Summary** — a plain-English sentence, but it's a **template
+  string**, not generated text. Every number in it (`crossed3`/`crossed7`/
+  `crossed30`, `newlyInactiveToday`, `nonResponsive`, worst district) is
+  computed first, then slotted into fixed sentence fragments. If you ever
+  swap this for a real LLM call, keep computing these numbers first and
+  passing them IN — never let the model compute the counts itself.
+- **Recommendations** — "visit" vs. "call" per currently-inactive CSP,
+  reusing `decideNudge`'s own `nudge-cap-reached`/`suppressed-by-reply`
+  outcome, plus a repeat-offender count from `getOnsetCounts()` (crossed
+  into a tier 2+ times in the last 90 days = a call clearly hasn't stuck).
+  Two rules, both disclosed in the reason string shown to the user.
+- **At-Risk** — early warning for currently-HEALTHY (0-2 day) CSPs: either
+  1-2 days from the 3-day self-nudge threshold, or a relapse history
+  (`getOnsetCounts() >= 1`) despite being healthy right now. Deliberately
+  titled "early warning," not "prediction" — it's proximity + history, not
+  a statistical or ML model, and the UI says so directly.
+
+**Naming discipline that mattered here:** none of these are labelled "AI
+X" in the UI — "Daily Summary," "Recommendations," "At-Risk CSPs," each
+subtitled with what actually produced them ("rule-based," "not AI-
+generated," "not a prediction"). The doc that inspired these used "AI" as
+the feature name; the implementation is honest about being arithmetic
+instead. If an LLM-backed version gets built later, keep BOTH — this layer
+is cheap, deterministic, and gives you a correctness baseline to check the
+AI version against, not something to delete once AI arrives.
+
+### Ops-analytics layer: real arithmetic, not AI
+
+`backend/src/services/analytics.service.ts` (geo breakdown, RM/DC performance)
+and `kpi.service.ts`'s `countNonResponsive`/`listNonResponsive` are a
+deliberately NON-AI analytics layer, built after a gap-analysis against a
+bigger "EYES V1" vision doc that also wanted AI summaries/recommendations/
+risk prediction — those were explicitly scoped OUT for this pass ("we will
+figure out something" for AI later). If that AI layer gets built later,
+these should stay as the ground-truth arithmetic underneath it, not get
+replaced by it:
+
+- **"Non Responsive"** is NOT a new heuristic — it's `decideNudge()`
+  resolving to `"nudge-cap-reached"` or `"suppressed-by-reply"` for a
+  currently-tiered CSP. Reusing the real guardrail decision means this
+  number can never silently drift from what the daily job actually does.
+- **Geo breakdown** (state/district) needed a parser change first — `State`
+  and `District` columns already exist in the Calling Sheet (columns 14 and
+  8) but were never parsed. Same case-insensitive dedup problem as LHO/RM/DC
+  (`"Bihar"` vs `"BIHAR"`) — grouped the same way (`PICK`-style: lowercase
+  key, first-seen casing as the label). It's a ranked bar list with
+  sequential-color intensity (one hue, `--critical`, light→dark via
+  `color-mix`), NOT a literal geographic map — there's no India state/
+  district boundary GeoJSON wired up, and for an internal ops list, rank +
+  magnitude carries the same information a shaded shape would, at a fraction
+  of the effort/risk (see `references/choosing-a-form.md` in the `dataviz`
+  skill — this was a deliberate "is it even a chart" call).
+- **RM/DC performance** needed `recovery_log` to carry `rm_name`/`dc_name`
+  (new nullable columns, same additive-migration pattern as `csp_code`
+  earlier) — attributed at `dailyJob.ts`'s recovery-detection step by
+  looking up the recovered `cspCode` in that day's fresh `records`, since
+  `person_state` itself never stored an RM/DC. Rows recorded before this
+  column existed (or via the background `syncInactivityState` path, which
+  doesn't have easy record access) are simply excluded from attribution, not
+  backfilled or guessed. "Efficiency %" reuses the exact recipe as the
+  global `recoveryRate` (`recovered / (recovered + currentlyInactive)`),
+  just scoped per RM/DC — not a bespoke score.
+
 ### Fast raw refresh, slow-cadence logic
 
 Two independent knobs, deliberately not the same:
@@ -101,12 +241,72 @@ is not a dry-run and has no test mode.
 `recovery_log` (who went inactive→active) has a twin: `inactivity_onset_log`
 (who went active→inactive), written by
 `backend/src/services/dailyChangeLog.service.ts` and populated from
-`dailyJob.ts` step 3 (`evaluated.filter(e => e.reason === "entered-tier")`).
-Both are per-person, per-day, named rows — not just aggregate counts — so the
-dashboard's "Today's changes" panel (`DailyChangesPanel.tsx`, backed by
+`dailyJob.ts` step 5, from the roster diff (below). Both are per-person,
+per-day, named rows — not just aggregate counts — so the dashboard's "Today's
+changes" panel (`DailyChangesPanel.tsx`, backed by
 `GET /api/daily-changes[?day=YYYY-MM-DD]`) can list exactly who, not just how
 many. If a future job needs a third "who changed state today" feed, follow
 this same pattern rather than inventing a new shape.
+
+### The day-over-day baseline is an immutable snapshot — never live state
+
+`daily_roster_snapshot` (`dailySnapshot.service.ts`) stores one frozen row per
+`(day, csp_code)`: their days and tier as of that day's run. Every
+day-over-day number — newly inactive, recovered, `new_breaches`,
+`newly_inactive` — comes from `diffRoster(records, today)` comparing today's
+sheet against **the most recent snapshot strictly before today**.
+
+**This replaced a real bug worth not reintroducing.** Onset/recovery used to
+be inferred by comparing today's sheet against `person_state`. But
+`syncInactivityState()` was being called from `fetchRecords()` — i.e. every
+minute by the sheet refresh, *and on every dashboard API request*. So
+`person_state` already held **today's** tiers long before the noon job ran,
+every CSP looked unchanged, and:
+
+- `entered-tier` never fired → `inactivity_onset_log` stayed empty for weeks
+  (62 rows, all from a single day, then nothing)
+- `new_breaches` and `newly_inactive` sat at `0` on every single snapshot row
+- recoveries were written at arbitrary times by whichever minute-refresh
+  noticed first, with `rm_name`/`dc_name` **null** (the background path passed
+  no record context) — 20/20 rows null, the tell-tale signature
+- the dashboard permanently showed "Newly Inactive (0)"
+
+Rules that keep this fixed:
+
+1. **Nothing on the read path writes state.** `fetchRecords()` is read-only.
+   `sheetRefresh.ts` only warms the cache. If you need "what changed", read a
+   snapshot — don't derive it from mutable live state.
+2. **`person_state` is now only about notification cadence** (`last_notified_at`
+   / `resendEveryDays`). It answers "when did we last message this person",
+   *not* "what did yesterday look like". Don't conflate them again.
+3. **The snapshot is written last**, after every comparison in the run is
+   done (`dailyJob.ts` step 7), so a run can never diff against itself.
+4. **No prior snapshot ⇒ report zero, not everything.** `diffRoster` returns
+   empty lists with `comparedTo: null` on a first-ever run rather than
+   declaring all ~500 CSPs brand-new onsets. Seed a baseline with
+   `npx tsx scripts/seedSnapshot.ts [YYYY-MM-DD]` so the *next* run has
+   something real to compare against.
+
+### A transition is not the same as a roster addition
+
+`diffRoster` deliberately splits two things that both look like "inactive
+today":
+
+- **`newlyInactive`** — healthy in yesterday's snapshot, flagged today. A real
+  behavioural change. This is the only thing counted in `newly_inactive` /
+  `new_breaches`, and the only thing `getOnsetCounts` (the repeat-offender
+  rule) counts.
+- **`newCspsAdded`** — absent from yesterday's snapshot entirely and already
+  flagged on arrival. Nothing changed about them; we just started seeing them.
+  Logged to the same table with `is_new_csp = 1`, shown in its own dashboard
+  column, and excluded from every count.
+
+Folding the second into the first makes a routine sheet import look like a
+mass outbreak, and would brand every newly-onboarded CSP a repeat offender on
+day one. A third case, **`droppedWhileFlagged`** (flagged yesterday, gone from
+the sheet today), is logged as a warning and counted as **neither** — a
+deleted row is not a recovery, and crediting it as one would inflate the
+recovery rate.
 
 ### The anti-nagging cadence guardrail
 

@@ -89,6 +89,21 @@ try {
   // Column already exists — fine.
 }
 
+// Who the CSP was assigned to AT THE MOMENT of recovery — the attribution
+// RM/DC performance stats (rmDcPerformance.service.ts) are computed from.
+// Null when the recovery was recorded without record context to hand (e.g.
+// the background sync path), or for rows predating this column.
+try {
+  db.exec(`ALTER TABLE recovery_log ADD COLUMN rm_name TEXT`);
+} catch {
+  // Column already exists — fine.
+}
+try {
+  db.exec(`ALTER TABLE recovery_log ADD COLUMN dc_name TEXT`);
+} catch {
+  // Column already exists — fine.
+}
+
 export interface PersonState {
   cspCode: string;
   personName: string;
@@ -157,6 +172,8 @@ export function recordRecovery(
   personName: string,
   now: string,
   nudgeCountAtRecovery: number | null = null,
+  rmName: string | null = null,
+  dcName: string | null = null,
 ): void {
   const state = db
     .prepare(`SELECT tier, days, first_flagged_at FROM person_state WHERE csp_code = ?`)
@@ -175,9 +192,9 @@ export function recordRecovery(
       : null;
 
   db.prepare(
-    `INSERT INTO recovery_log (person_name, tier_at_recovery, days_flagged, recovered_at, nudge_count_at_recovery, csp_code)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(personName, state?.tier ?? null, daysFlagged, now, nudgeCountAtRecovery, cspCode);
+    `INSERT INTO recovery_log (person_name, tier_at_recovery, days_flagged, recovered_at, nudge_count_at_recovery, csp_code, rm_name, dc_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(personName, state?.tier ?? null, daysFlagged, now, nudgeCountAtRecovery, cspCode, rmName, dcName);
 
   db.prepare(
     `UPDATE person_state SET tier = NULL, first_flagged_at = NULL, last_notified_at = NULL,
@@ -252,3 +269,49 @@ export function countRecoveries(sinceDays = 30): number {
     .get(`-${sinceDays} days`) as { c: number };
   return row.c;
 }
+
+export interface RecentRecovery {
+  personName: string;
+  rmName: string | null;
+  dcName: string | null;
+  daysFlagged: number | null;
+  recoveredAt: string;
+}
+
+/** Feeds RM/DC performance stats (analytics.service.ts) — who recovered, attributed to whoever was assigned to them at the time. */
+export function getRecentRecoveries(sinceDays = 30): RecentRecovery[] {
+  const rows = db
+    .prepare(
+      `SELECT person_name, rm_name, dc_name, days_flagged, recovered_at FROM recovery_log
+       WHERE recovered_at >= datetime('now', ?)`,
+    )
+    .all(`-${sinceDays} days`) as {
+    person_name: string;
+    rm_name: string | null;
+    dc_name: string | null;
+    days_flagged: number | null;
+    recovered_at: string;
+  }[];
+
+  return rows.map((r) => ({
+    personName: r.person_name,
+    rmName: r.rm_name,
+    dcName: r.dc_name,
+    daysFlagged: r.days_flagged,
+    recoveredAt: r.recovered_at,
+  }));
+}
+
+// NOTE: a `syncInactivityState()` used to live here and was called from
+// `fetchRecords()` — i.e. every minute, and on every dashboard request. It ran
+// detectRecoveries + upsertPersonState on that fast path, which meant the noon
+// job's baseline ("what did yesterday look like?") was already overwritten with
+// today's values before it ever got to compare. Result: `entered-tier` never
+// fired, `inactivity_onset_log` stayed empty, recoveries were logged at random
+// times with null RM/DC attribution, and new_breaches/newly_inactive were
+// permanently 0.
+//
+// Day-over-day comparison now has one owner: the daily job, reading an
+// immutable per-day baseline from dailySnapshot.service.ts. Nothing on the
+// read path may write state — see SKILLS.md "Fast raw refresh, slow-cadence
+// logic" and the note atop dataSource.service.ts.

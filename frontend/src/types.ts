@@ -4,6 +4,13 @@ export interface Contact {
   mobile: string;
 }
 
+export interface OneOffNudgeResult {
+  success: boolean;
+  cspCode: string;
+  personName: string;
+  error?: string;
+}
+
 export interface InactivityRecord {
   cspCode: string;
   targetPersonName: string;
@@ -16,6 +23,8 @@ export interface InactivityRecord {
   dc: Contact | null;
   lhoName: string;
   lhoEmail: string;
+  state: string;
+  district: string;
   terminalStatus: string;
   lastLoginDate: string | null;
   sourceRow: number;
@@ -81,6 +90,7 @@ export interface KpiReport {
   totalPeople: number;
   unknownPeople: number;
   atRisk: number;
+  nonResponsive: number;
   recoveries: number;
   newBreaches: number;
   recoveryRate: number;
@@ -131,6 +141,8 @@ export interface InactivityOnsetEntry {
   tier: string | null;
   days: number;
   onsetAt: string;
+  /** Their day-count in yesterday's snapshot, so the UI can show "was 2d → now 4d". Null when unknown or for a new CSP. */
+  previousDays: number | null;
 }
 
 export interface RecoveryEntry {
@@ -142,8 +154,70 @@ export interface RecoveryEntry {
 
 export interface DailyChanges {
   day: string;
+  /** Real transitions only: healthy yesterday, flagged today. */
   newlyInactive: InactivityOnsetEntry[];
+  /** Appeared in the sheet already flagged — a roster addition, deliberately NOT counted as a transition. */
+  newCspsAdded: InactivityOnsetEntry[];
   recovered: RecoveryEntry[];
+}
+
+export interface GeoBucket {
+  key: string;
+  label: string;
+  total: number;
+  inactive: number;
+  rate: number;
+}
+
+export interface GeoBreakdown {
+  states: GeoBucket[];
+  districts: GeoBucket[];
+}
+
+export interface PerformanceEntry {
+  key: string;
+  label: string;
+  currentlyInactive: number;
+  recovered: number;
+  avgRecoveryDays: number | null;
+  efficiency: number;
+}
+
+export interface RmDcPerformance {
+  rm: PerformanceEntry[];
+  dc: PerformanceEntry[];
+}
+
+export interface DailySummary {
+  text: string;
+  stats: {
+    totalInactive: number;
+    newlyInactiveToday: number;
+    crossed3: number;
+    crossed7: number;
+    crossed30: number;
+    nonResponsive: number;
+    worstDistrict: { label: string; rate: number } | null;
+  };
+}
+
+export type RecommendationCategory = "visit" | "call";
+
+export interface Recommendation {
+  cspCode: string;
+  personName: string;
+  days: number | null;
+  rmName: string;
+  category: RecommendationCategory;
+  reason: string;
+}
+
+export interface AtRiskEntry {
+  cspCode: string;
+  personName: string;
+  days: number | null;
+  rmName: string;
+  reason: string;
 }
 
 export interface TuningEvaluation {
@@ -164,6 +238,76 @@ export interface TuningReport {
   bounds: [number, number];
   defaultValue: number;
   history: TuningEvaluation[];
+}
+
+/**
+ * Runtime configuration an operator can change from the dashboard. Mirrors
+ * the backend's AppSettings (settings.service.ts) — every field is always
+ * present in a GET response; a PATCH-style save may send any subset.
+ */
+export interface AppSettings {
+  emailEnabled: boolean;
+  whatsappEnabled: boolean;
+  inactivityThresholdDays: number;
+  targetInactivityRate: number;
+  cspMaxNudges: number;
+  cspNudgeCooldownDays: number;
+}
+
+export type TemplateChannel = "email" | "whatsapp";
+
+/**
+ * Mirrors the backend's EffectiveTemplate (templates.service.ts). `approvalLocked`
+ * is true only for WhatsApp templates — the wording here does not reach the
+ * recipient as typed on the Goinfinito/Meta approved-template channel; only
+ * the placeholder VALUES do. The frontend must show this caveat, never hide it.
+ */
+export interface EffectiveTemplate {
+  key: string;
+  label: string;
+  description: string;
+  channel: TemplateChannel;
+  requiredPlaceholders: string[];
+  sampleVars: Record<string, string>;
+  approvalLocked?: boolean;
+  defaultValue: string;
+  value: string;
+  isCustomized: boolean;
+}
+
+export interface ReachedCspAttempt {
+  personName: string;
+  days: number;
+  channel: "email" | "whatsapp";
+  success: boolean;
+}
+
+export interface ReachedRecipient {
+  contact: string;
+  name: string | null;
+  cspsCovered: number;
+  cspsAttempted: number;
+  sent: number;
+  failed: number;
+  csps: ReachedCspAttempt[];
+}
+
+export interface RoleReach {
+  reached: number;
+  attempted: number;
+  entries: ReachedRecipient[];
+}
+
+export interface MessageReach {
+  jobRunId: number | null;
+  runAt: string | null;
+  csp: {
+    reached: number;
+    attempted: number;
+    people: ReachedCspAttempt[];
+  };
+  rm: RoleReach;
+  dc: RoleReach;
 }
 
 export interface TestChannelResult {

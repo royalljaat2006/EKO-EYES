@@ -54,6 +54,15 @@ try {
   // Column already exists, ignore
 }
 
+// The human name behind `recipient` (an email/mobile string alone doesn't
+// tell a reader WHO an RM/DC actually is) — see NotificationOutcome.recipientName.
+// Null for every row recorded before this column existed.
+try {
+  db.exec(`ALTER TABLE alert_log ADD COLUMN recipient_name TEXT;`);
+} catch (e) {
+  // Column already exists, ignore
+}
+
 db.exec(`CREATE INDEX IF NOT EXISTS idx_alert_log_message_id ON alert_log(message_id);`);
 
 export function persistDailyJobResult(result: DailyJobResult): number {
@@ -68,8 +77,8 @@ export function persistDailyJobResult(result: DailyJobResult): number {
   const jobRunId = Number(runInfo.lastInsertRowid);
 
   const insertAlert = db.prepare(
-    `INSERT INTO alert_log (job_run_id, person_name, days, channel, role, recipient, success, error, message_id, delivery_status)
-     VALUES (@jobRunId, @personName, @days, @channel, @role, @recipient, @success, @error, @messageId, @deliveryStatus)`,
+    `INSERT INTO alert_log (job_run_id, person_name, days, channel, role, recipient, recipient_name, success, error, message_id, delivery_status)
+     VALUES (@jobRunId, @personName, @days, @channel, @role, @recipient, @recipientName, @success, @error, @messageId, @deliveryStatus)`,
   );
 
   const insertMany = db.transaction((rows: typeof result.notifications) => {
@@ -81,6 +90,7 @@ export function persistDailyJobResult(result: DailyJobResult): number {
         channel: n.channel,
         role: n.role,
         recipient: n.recipient,
+        recipientName: n.recipientName ?? null,
         success: n.success ? 1 : 0,
         error: n.error ?? null,
         messageId: n.messageId ?? null,

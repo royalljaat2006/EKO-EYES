@@ -1,5 +1,8 @@
 import type { InactivityRecord } from "../types";
 import { isPlaceholderAssignee } from "../utils/placeholder";
+import { statusOf, STATUS_META } from "../statusOptions";
+import Panel from "./Panel";
+import RowActions from "./RowActions";
 
 interface Props {
   records: InactivityRecord[];
@@ -28,13 +31,11 @@ function reachability(r: InactivityRecord): { label: string; className: string; 
 
 export default function DataTable({ records, thresholdLabel }: Props) {
   return (
-    <div className="panel">
-      <div className="panel__header">
-        <h2>Inactive CSPs</h2>
-        <span className="panel__subtitle">
-          {thresholdLabel} &middot; {records.length} CSP{records.length === 1 ? "" : "s"}
-        </span>
-      </div>
+    <Panel
+      title="Inactive CSPs"
+      focusable
+      subtitle={`${thresholdLabel} · ${records.length} CSP${records.length === 1 ? "" : "s"}`}
+    >
       <div className="table-scroll">
         <table className="data-table">
           <thead>
@@ -43,6 +44,7 @@ export default function DataTable({ records, thresholdLabel }: Props) {
               <th>CSP Code</th>
               <th>CSP Name</th>
               <th>Days</th>
+              <th>Status</th>
               <th>Terminal</th>
               <th>CSP Mobile</th>
               <th>RM</th>
@@ -53,17 +55,24 @@ export default function DataTable({ records, thresholdLabel }: Props) {
               <th>DC Mobile</th>
               <th>Last Login</th>
               <th>Alertable</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {records.map((r, i) => {
               const reach = reachability(r);
+              const pill = STATUS_META[statusOf(r)];
               return (
                 <tr key={r.sourceRow}>
                   <td className="num">{i + 1}</td>
                   <td className="num">{r.cspCode}</td>
                   <td>{r.targetPersonName}</td>
                   <td className="num">{r.days ?? "—"}</td>
+                  <td>
+                    <span className={`status-pill ${pill.className}`}>
+                      <span aria-hidden="true">{pill.icon}</span> {pill.label}
+                    </span>
+                  </td>
                   <td>{r.terminalStatus || "—"}</td>
                   <td className="num">{r.cspMobile || "—"}</td>
                   <td>{r.rmName || "—"}</td>
@@ -78,12 +87,15 @@ export default function DataTable({ records, thresholdLabel }: Props) {
                       <span aria-hidden="true">{reach.icon}</span> {reach.label}
                     </span>
                   </td>
+                  <td>
+                    <RowActions record={r} />
+                  </td>
                 </tr>
               );
             })}
             {records.length === 0 && (
               <tr>
-                <td colSpan={14} className="empty-state">
+                <td colSpan={16} className="empty-state">
                   No inactive CSPs at this threshold.
                 </td>
               </tr>
@@ -91,6 +103,6 @@ export default function DataTable({ records, thresholdLabel }: Props) {
           </tbody>
         </table>
       </div>
-    </div>
+    </Panel>
   );
 }

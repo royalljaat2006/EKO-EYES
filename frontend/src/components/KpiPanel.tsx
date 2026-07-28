@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Area,
   Bar,
   CartesianGrid,
   ComposedChart,
@@ -16,6 +17,7 @@ import type { KpiReport } from "../types";
 import { RANGE_OPTIONS, RANGE_LABELS } from "../rangeOptions";
 import type { RangeOption, RangeFilter } from "../rangeOptions";
 import type { Tier } from "../tierOptions";
+import Panel from "./Panel";
 
 interface Props {
   kpi: KpiReport;
@@ -236,12 +238,7 @@ export default function KpiPanel({
   const daysWithData = windowTrend.filter((d) => d.count !== undefined || d.recovered !== undefined).length;
 
   return (
-    <div className="panel">
-      <div className="panel__header">
-        <h2>Progress to target</h2>
-        <span className="panel__subtitle">Goal: keep inactivity at or below {kpi.targetRate}%</span>
-      </div>
-
+    <Panel title="Progress to target" subtitle={`Goal: keep inactivity at or below ${kpi.targetRate}%`} focusable>
       <div className="kpi-hero">
         <div className="kpi-hero__main">
           <span className={`kpi-hero__value${onTarget ? " kpi-hero__value--good" : " kpi-hero__value--bad"}`}>
@@ -320,6 +317,16 @@ export default function KpiPanel({
         <>
           <ResponsiveContainer width="100%" height={280}>
             <ComposedChart data={displayTrend} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+              <defs>
+                <linearGradient id="areaGlow" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="var(--brand-amber, #f5a623)" stopOpacity={0.35}/>
+                  <stop offset="95%" stopColor="var(--brand-amber, #f5a623)" stopOpacity={0.01}/>
+                </linearGradient>
+                <linearGradient id="barBlue" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="var(--series-1, #2a78d6)" stopOpacity={0.75}/>
+                  <stop offset="95%" stopColor="var(--series-1, #2a78d6)" stopOpacity={0.1}/>
+                </linearGradient>
+              </defs>
               <CartesianGrid vertical={false} stroke="var(--gridline)" />
               <XAxis
                 dataKey="day"
@@ -357,31 +364,40 @@ export default function KpiPanel({
               <Bar
                 yAxisId="change"
                 dataKey="recovered"
-                name="Recovered (Left Y-Axis)"
+                name="Recovered (Left Y)"
                 fill="var(--good-wash)"
                 stroke="var(--good)"
                 strokeWidth={1}
-                radius={[4, 4, 0, 0]}
-                maxBarSize={30}
+                radius={[6, 6, 0, 0]}
+                maxBarSize={20}
                 isAnimationActive={false}
               />
               <Bar
                 yAxisId="change"
                 dataKey="newlyInactive"
-                name="Newly Inactive (Left Y-Axis)"
-                fill="var(--critical-wash)"
-                stroke="var(--critical)"
+                name="Newly Inactive (Left Y)"
+                fill="url(#barBlue)"
+                stroke="var(--series-1)"
                 strokeWidth={1}
-                radius={[4, 4, 0, 0]}
-                maxBarSize={30}
+                radius={[6, 6, 0, 0]}
+                maxBarSize={20}
+                isAnimationActive={false}
+              />
+              <Area
+                yAxisId="count"
+                type="monotone"
+                dataKey="count"
+                stroke="none"
+                fill="url(#areaGlow)"
+                connectNulls
                 isAnimationActive={false}
               />
               <Line
                 yAxisId="count"
                 type="monotone"
                 dataKey="count"
-                name="Total Inactive CSPs (Right Y-Axis)"
-                stroke="var(--series-1)"
+                name="Total Inactive (Right Y)"
+                stroke="var(--brand-amber, #f5a623)"
                 strokeWidth={3}
                 dot={{ r: 4, strokeWidth: 2, fill: "var(--surface-1)" }}
                 activeDot={{ r: 6, strokeWidth: 2, fill: "var(--surface-1)" }}
@@ -411,7 +427,6 @@ export default function KpiPanel({
             onClick={() => onTierChipClick(t.tier as Tier)}
           >
             <span className="tier-chip__count">{t.count}</span>
-            <span className="tier-chip__label">{t.label}</span>
             <span className="tier-chip__range">{t.range}</span>
           </button>
         ))}
@@ -442,6 +457,6 @@ export default function KpiPanel({
           </div>
         </div>
       )}
-    </div>
+    </Panel>
   );
 }

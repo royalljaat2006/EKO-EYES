@@ -3,6 +3,7 @@ import { google } from "googleapis";
 import env from "../config/env";
 import logger from "../utils/logger";
 import { InactivityRecord, NotificationRole } from "../types";
+import { getTemplate, renderTemplate } from "./templates.service";
 
 let transporter: Transporter | null = null;
 
@@ -131,7 +132,7 @@ export async function sendDigestEmail(
   const mailOptions: nodemailer.SendMailOptions = {
     from: env.ALERT_EMAIL_FROM,
     to: recipient,
-    subject: `Action required: inactivity digest (${role})`,
+    subject: renderTemplate(getTemplate("emailDigestSubject"), { role }),
     text: body,
     html: htmlBody,
   };

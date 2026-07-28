@@ -1,5 +1,5 @@
-import env from "../config/env";
 import logger from "../utils/logger";
+import { getNumberSetting } from "../services/settings.service";
 import { fetchRecords, invalidateCache } from "../services/dataSource.service";
 import { persistDailyJobResult } from "../services/alertStore.service";
 import {
@@ -21,7 +21,12 @@ import {
 import { runAdaptiveTuning } from "../services/adaptiveTuning.service";
 import { known, unknownCount } from "../services/inactivity.service";
 import { invalidateContactsCache } from "../services/contacts.service";
-import { detectRecoveries, evaluateAll } from "../services/escalation.service";
+import { evaluateAll } from "../services/escalation.service";
+import {
+  diffRoster,
+  saveDailySnapshot,
+  snapshotDayCount,
+} from "../services/dailySnapshot.service";
 import { computeRate } from "../services/kpi.service";
 import {
   loadPersonStates,
@@ -68,22 +73,68 @@ export async function runDailyInactivityJob(): Promise<DailyJobResult> {
     const records = await fetchRecords(true);
     const states = loadPersonStates();
 
-    // 1. Anyone who dropped out of a tier since the last run has recovered.
-    //    Matched by cspCode (stable), not name — see escalation.service.ts.
-    const recovered = detectRecoveries(records, states);
-    for (const { cspCode, personName } of recovered) {
+    // 1. THE day-over-day comparison. Diffed against yesterday's IMMUTABLE
+    //    snapshot (dailySnapshot.service.ts), never against live
+    //    `person_state` — that used to be rewritten every minute by the sheet
+    //    refresh, so the baseline was already today's data by the time we got
+    //    here and nothing ever looked changed. `person_state` is still read
+    //    below, but only for notification cadence (when did we last message
+    //    this person), which is a different question.
+    //
+    //    The diff separates a real transition (healthy yesterday -> flagged
+    //    today) from a CSP that merely APPEARED in the sheet already flagged.
+    //    The second is a roster event, not a behaviour change, so it never
+    //    inflates the "newly inactive" count.
+    const diff = diffRoster(records, today);
+    if (diff.comparedTo === null) {
+      logger.warn(
+        { snapshotDays: snapshotDayCount() },
+        "No earlier roster snapshot to compare against — recording today as the baseline and reporting zero changes. " +
+          "Day-over-day numbers become real from the next run.",
+      );
+    } else {
+      logger.info(
+        {
+          comparedTo: diff.comparedTo,
+          newlyInactive: diff.newlyInactive.length,
+          newCspsAdded: diff.newCspsAdded.length,
+          recovered: diff.recovered.length,
+          droppedWhileFlagged: diff.droppedWhileFlagged.length,
+        },
+        "Day-over-day roster diff complete",
+      );
+    }
+
+    for (const { record, previousTier, previousDays } of diff.recovered) {
       // Read the nudge count BEFORE resetEngagement wipes it — this is the
       // signal the adaptive-tuning loop below learns from.
-      const nudgeCountAtRecovery = getNudgeCount(cspCode);
-      recordRecovery(cspCode, personName, runAt, nudgeCountAtRecovery);
+      const nudgeCountAtRecovery = getNudgeCount(record.cspCode);
+      // Attribute the recovery to whoever is assigned to them right now, for
+      // the RM/DC performance stats.
+      recordRecovery(
+        record.cspCode,
+        record.targetPersonName,
+        runAt,
+        nudgeCountAtRecovery,
+        record.rmName || null,
+        record.dcName || null,
+      );
       // Wipe the nudge count so a future lapse starts from a clean slate rather
       // than resuming at an already-exhausted cap.
-      resetEngagement(cspCode);
+      resetEngagement(record.cspCode);
+      logger.debug(
+        { cspCode: record.cspCode, from: previousTier, wasDays: previousDays, nowDays: record.days },
+        "Recovered since yesterday",
+      );
     }
-    if (recovered.length > 0) {
-      logger.info(
-        { recovered: recovered.map((r) => r.personName) },
-        "People recovered since last run",
+
+    if (diff.droppedWhileFlagged.length > 0) {
+      // NOT logged as recoveries: we cannot tell a genuine recovery from a row
+      // being deleted or reassigned in the sheet, and crediting the alerting
+      // for a deletion would quietly inflate the recovery rate.
+      logger.warn(
+        { count: diff.droppedWhileFlagged.length, csps: diff.droppedWhileFlagged.map((e) => e.cspCode) },
+        "CSPs were flagged yesterday but have vanished from the sheet — NOT counted as recoveries",
       );
     }
 
@@ -163,7 +214,10 @@ export async function runDailyInactivityJob(): Promise<DailyJobResult> {
       );
     }
 
-    // 4. Persist state so tomorrow's run can dedupe and detect recovery.
+    // 4. Persist notification state — who is in which tier, and whether we
+    //    messaged them today. This drives the anti-nagging cadence
+    //    (`resendEveryDays`), NOT the day-over-day comparison, which now reads
+    //    the snapshot written in step 6 instead.
     for (const e of evaluated) {
       // evaluatePerson() only returns rows with a known days value, so this is safe.
       upsertPersonState(
@@ -176,34 +230,47 @@ export async function runDailyInactivityJob(): Promise<DailyJobResult> {
       );
     }
 
-    // 5. Snapshot the number we are actually trying to move. The rate is measured
+    // 5. Record WHO changed today, from the snapshot diff — the named audit
+    //    trail behind the dashboard's daily-change numbers. Real transitions
+    //    and roster additions are written to the same table but flagged
+    //    apart, so the count only ever reflects actual behaviour change.
+    for (const { record, tier, previousDays } of diff.newlyInactive) {
+      recordInactivityOnset(
+        record.targetPersonName,
+        record.cspCode,
+        tier,
+        record.days ?? 0,
+        runAt,
+        false,
+        previousDays,
+      );
+    }
+    for (const { record, tier } of diff.newCspsAdded) {
+      recordInactivityOnset(
+        record.targetPersonName,
+        record.cspCode,
+        tier,
+        record.days ?? 0,
+        runAt,
+        true,
+        null,
+      );
+    }
+
+    // 6. Snapshot the number we are actually trying to move. The rate is measured
     //    only over rows we can measure; "No transaction data" is not a zero.
     const measurable = known(records);
     const inactiveCount = measurable.filter(
-      (r) => r.days > env.INACTIVITY_THRESHOLD_DAYS,
+      (r) => r.days > getNumberSetting("inactivityThresholdDays"),
     ).length;
     const atRiskCount = measurable.filter((r) => tierForDays(r.days)?.tier === "self").length;
-    // A "breach" is escalating past the CSP-only self-nudge stage.
-    const newBreaches = evaluated.filter(
-      (e) => e.reason === "entered-tier" && e.policy.tier !== "self",
-    ).length;
-    // The daily-change chart's other half: EVERY first-time entrant, including
-    // day-3 self-nudge — i.e. someone who was active yesterday and is flagged
-    // today, at any severity. Distinct from newBreaches above.
-    const newlyInactiveToday = evaluated.filter((e) => e.reason === "entered-tier");
-    const newlyInactive = newlyInactiveToday.length;
-    // Named audit trail (dailyChangeLog.service.ts) — WHO specifically went
-    // active -> inactive today, not just the count. Mirrors recordRecovery
-    // above, which already logs the other direction per-person.
-    for (const e of newlyInactiveToday) {
-      recordInactivityOnset(
-        e.record.targetPersonName,
-        e.record.cspCode,
-        e.policy.tier,
-        e.record.days ?? 0,
-        runAt,
-      );
-    }
+    // Both counts come from the SAME diff, so they can never disagree with the
+    // per-person audit trail above. A "breach" is a transition that landed
+    // past the CSP-only self-nudge stage; `newlyInactive` is every real
+    // transition at any severity. Roster additions are in neither — they did
+    // not transition.
+    const newBreaches = diff.newlyInactive.filter((n) => n.tier !== "self").length;
+    const newlyInactive = diff.newlyInactive.length;
 
     const rangeCounts: Record<RangeOption, number> = {} as Record<RangeOption, number>;
     for (const opt of RANGE_OPTIONS) {
@@ -217,10 +284,14 @@ export async function runDailyInactivityJob(): Promise<DailyJobResult> {
       inactivityRate: computeRate(inactiveCount, measurable.length),
       atRiskCount,
       newBreaches,
-      recoveries: recovered.length,
+      recoveries: diff.recovered.length,
       newlyInactive,
       rangeCounts,
     });
+
+    // 7. Freeze today's roster LAST — after every comparison is done — so it
+    //    becomes tomorrow's baseline. Written once per day by this job only.
+    saveDailySnapshot(today, records);
 
     const result: DailyJobResult = {
       runAt,
@@ -240,7 +311,11 @@ export async function runDailyInactivityJob(): Promise<DailyJobResult> {
         unreachable: unreachable.length,
         unknownDays: unknownCount(records),
         inactivityRate: computeRate(inactiveCount, measurable.length),
-        target: env.TARGET_INACTIVITY_RATE,
+        target: getNumberSetting("targetInactivityRate"),
+        comparedTo: diff.comparedTo,
+        newlyInactive,
+        newCspsAdded: diff.newCspsAdded.length,
+        recovered: diff.recovered.length,
       },
       "Daily inactivity job complete",
     );

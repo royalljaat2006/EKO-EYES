@@ -1,5 +1,8 @@
 import { useState } from "react";
 import type { DeliveryStatus, DeliverySummary } from "../types";
+import { usePagination } from "../usePagination";
+import Panel from "./Panel";
+import Pager from "./Pager";
 
 const STATUS_META: Record<DeliveryStatus, { label: string; icon: string; className: string }> = {
   delivered: { label: "Delivered", icon: "✓", className: "status--delivered" },
@@ -7,24 +10,24 @@ const STATUS_META: Record<DeliveryStatus, { label: string; icon: string; classNa
   failed: { label: "Failed", icon: "✕", className: "status--failed" },
 };
 
+const PAGE_SIZE = 25;
+
 interface Props {
   summary: DeliverySummary;
 }
 
 export default function DeliveryPanel({ summary }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
+  const { page, pageCount, visible, setPage } = usePagination(summary.people, PAGE_SIZE);
 
   if (summary.jobRunId === null) {
     return (
-      <div className="panel">
-        <div className="panel__header">
-          <h2>Alert delivery</h2>
-        </div>
+      <Panel title="Alert delivery">
         <p className="empty-state">
           No alert run has executed yet. Alerts are sent automatically each day, or you can
           trigger a run manually.
         </p>
-      </div>
+      </Panel>
     );
   }
 
@@ -32,14 +35,11 @@ export default function DeliveryPanel({ summary }: Props) {
   const whatsapp = summary.byChannel.find((c) => c.channel === "whatsapp");
 
   return (
-    <div className="panel">
-      <div className="panel__header">
-        <h2>Alert delivery</h2>
-        <span className="panel__subtitle">
-          Last run {summary.runAt ? new Date(summary.runAt).toLocaleString() : "—"}
-        </span>
-      </div>
-
+    <Panel
+      title="Alert delivery"
+      focusable
+      subtitle={`Last run ${summary.runAt ? new Date(summary.runAt).toLocaleString() : "—"}`}
+    >
       <div className="delivery-stats">
         <div className="delivery-stat">
           <span className="delivery-stat__value">{summary.peopleAlerted}</span>
@@ -84,7 +84,7 @@ export default function DeliveryPanel({ summary }: Props) {
             </tr>
           </thead>
           <tbody>
-            {summary.people.map((person) => {
+            {visible.map((person) => {
               const meta = STATUS_META[person.status];
               const isOpen = expanded === person.personName;
               return [
@@ -140,6 +140,15 @@ export default function DeliveryPanel({ summary }: Props) {
           </tbody>
         </table>
       </div>
-    </div>
+
+      <Pager
+        page={page}
+        pageCount={pageCount}
+        visibleCount={visible.length}
+        totalCount={summary.people.length}
+        onPrev={() => setPage(page - 1)}
+        onNext={() => setPage(page + 1)}
+      />
+    </Panel>
   );
 }
