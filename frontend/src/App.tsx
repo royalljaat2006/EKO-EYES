@@ -628,6 +628,29 @@ export default function App() {
         </div>
       )}
 
+      {settings?.emailEnabled && settings.emailDraftOnly && (
+        <div className="channels-off-banner" role="status">
+          <span aria-hidden="true">🧪</span>
+          <span>
+            <strong>Email draft-only mode</strong> is on — RM/DC emails are being composed and saved as
+            drafts, not sent. This is why Alert Delivery can look like everything failed: successful
+            drafts aren&rsquo;t counted there as &ldquo;sent&rdquo; (they were never attempted for real
+            delivery) — check Email Drafts for what actually went out. Only genuine problems, like a
+            missing RM/DC contact, still show up as failed.
+          </span>
+          <button
+            type="button"
+            className="channels-off-banner__link"
+            onClick={() => {
+              setActiveTab("system");
+              setCardDetail(null);
+            }}
+          >
+            Open settings
+          </button>
+        </div>
+      )}
+
       {error && <div className="error-banner">{error}</div>}
 
       {!roster && !error ? (
