@@ -13,6 +13,7 @@ import AdaptiveTuningPanel from "./components/AdaptiveTuningPanel";
 import SettingsPanel from "./components/SettingsPanel";
 import TemplatesPanel from "./components/TemplatesPanel";
 import MessageReachPanel from "./components/MessageReachPanel";
+import EmailDraftsPanel from "./components/EmailDraftsPanel";
 import GeoHeatMap from "./components/GeoHeatMap";
 import RmDcPerformancePanel from "./components/RmDcPerformancePanel";
 import TopCriticalPanel from "./components/TopCriticalPanel";
@@ -837,6 +838,7 @@ export default function App() {
                   </div>
                   {delivery && <DeliveryPanel summary={delivery} />}
                   <MessageReachPanel />
+                  <EmailDraftsPanel />
                   <AllCspsTable records={roster.records} />
                   <TestDeliveryPanel />
                 </>

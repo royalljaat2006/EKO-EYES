@@ -83,8 +83,49 @@ export const TEMPLATE_DEFS: TemplateDefinition[] = [
     defaultValue: "Action required: inactivity digest ({{role}})",
   },
   {
+    key: "rmEmailBody",
+    label: "RM email — full body",
+    description:
+      "The whole digest email sent to an RM (from day 7, once they're responsible for at least one inactive CSP). " +
+      "{{cspList}} is where the day-by-day CSP breakdown is inserted automatically — reword everything around it freely, but the token itself must stay, or the RM's actual CSP list disappears from the email.",
+    channel: "email",
+    requiredPlaceholders: ["{{cspList}}"],
+    sampleVars: {
+      count: "2",
+      targetRate: "2",
+      cspList:
+        "RM FOLLOW-UP — Inactive 7+ days — RM follow-up required\n  • Ram Kumar (1A850247) — 9 days inactive\n  • Sita Devi (1A850391) — 12 days inactive",
+    },
+    defaultValue:
+      "Inactivity digest for you as Relationship Manager. {{count}} CSP(s) under you need attention.\n\n" +
+      "{{cspList}}\n\n" +
+      "Target: keep inactivity at or below {{targetRate}}%.\n\n" +
+      "-- E.Y.E.S. (EKO Yield & Escalation System)",
+  },
+  {
+    key: "dcEmailBody",
+    label: "DC email — full body",
+    description:
+      "The whole digest email sent to a DC (from day 15 they're WhatsApp-only; this EMAIL only starts once one of their CSPs reaches day 30/critical). " +
+      "{{cspList}} is where the day-by-day CSP breakdown is inserted automatically — reword everything around it freely, but the token itself must stay, or the DC's actual CSP list disappears from the email.",
+    channel: "email",
+    requiredPlaceholders: ["{{cspList}}"],
+    sampleVars: {
+      count: "1",
+      targetRate: "2",
+      cspList:
+        "CRITICAL — CRITICAL — inactive 30+ days, urgent daily follow-up by RM and DC\n  • Mohan Lal (1A850112) — 34 days inactive",
+    },
+    defaultValue:
+      "Inactivity digest for you as District Coordinator. {{count}} CSP(s) under you need attention — these have " +
+      "reached the point where WhatsApp follow-up alone hasn't been enough.\n\n" +
+      "{{cspList}}\n\n" +
+      "Target: keep inactivity at or below {{targetRate}}%.\n\n" +
+      "-- E.Y.E.S. (EKO Yield & Escalation System)",
+  },
+  {
     key: "tierHeadlineSelf",
-    label: "Tier headline — Self-nudge (3–7 days)",
+    label: "Tier headline — Self-nudge (3–6 days)",
     description: "Shown at the top of this tier's section inside the email digest body.",
     channel: "email",
     requiredPlaceholders: [],
@@ -93,30 +134,30 @@ export const TEMPLATE_DEFS: TemplateDefinition[] = [
   },
   {
     key: "tierHeadlineBreach",
-    label: "Tier headline — RM follow-up (8–15 days)",
+    label: "Tier headline — RM follow-up (7–14 days)",
     description: "Shown at the top of this tier's section inside the email digest body.",
     channel: "email",
     requiredPlaceholders: [],
     sampleVars: {},
-    defaultValue: "Inactive over 7 days — RM follow-up required",
+    defaultValue: "Inactive 7+ days — RM follow-up required",
   },
   {
     key: "tierHeadlineEscalated",
-    label: "Tier headline — RM + DC (16–23 days)",
+    label: "Tier headline — RM + DC (15–29 days)",
     description: "Shown at the top of this tier's section inside the email digest body.",
     channel: "email",
     requiredPlaceholders: [],
     sampleVars: {},
-    defaultValue: "Inactive over 15 days — RM and DC follow-up required",
+    defaultValue: "Inactive 15+ days — RM and DC follow-up required",
   },
   {
     key: "tierHeadlineCritical",
-    label: "Tier headline — Critical (24+ days)",
+    label: "Tier headline — Critical (30+ days)",
     description: "Shown at the top of this tier's section inside the email digest body.",
     channel: "email",
     requiredPlaceholders: [],
     sampleVars: {},
-    defaultValue: "CRITICAL — inactive 23+ days, urgent daily follow-up by RM and DC",
+    defaultValue: "CRITICAL — inactive 30+ days, urgent daily follow-up by RM and DC",
   },
 ];
 

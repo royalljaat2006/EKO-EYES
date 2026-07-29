@@ -247,11 +247,25 @@ export interface TuningReport {
  */
 export interface AppSettings {
   emailEnabled: boolean;
+  /** When true (and emailEnabled), every email is composed as usual but saved as a draft instead of sent. */
+  emailDraftOnly: boolean;
   whatsappEnabled: boolean;
   inactivityThresholdDays: number;
   targetInactivityRate: number;
   cspMaxNudges: number;
   cspNudgeCooldownDays: number;
+}
+
+export interface EmailDraft {
+  id: number;
+  jobRunId: number | null;
+  role: string;
+  recipient: string;
+  recipientName: string | null;
+  subject: string;
+  body: string;
+  cspCount: number;
+  createdAt: string;
 }
 
 export type TemplateChannel = "email" | "whatsapp";

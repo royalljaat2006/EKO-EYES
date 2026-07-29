@@ -7,10 +7,10 @@
 export type Tier = "self" | "breach" | "escalated" | "critical";
 
 export const TIER_BOUNDS: Record<Tier, [number, number | null]> = {
-  self: [3, 7],
-  breach: [8, 15],
-  escalated: [16, 23],
-  critical: [24, null],
+  self: [3, 6],
+  breach: [7, 14],
+  escalated: [15, 29],
+  critical: [30, null],
 };
 
 export function tierForDays(days: number | null): Tier | null {

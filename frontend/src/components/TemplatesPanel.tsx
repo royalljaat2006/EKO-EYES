@@ -20,6 +20,29 @@ function missingPlaceholders(t: EffectiveTemplate, value: string): string[] {
 }
 
 /**
+ * Surfaces the server's OWN message when it sent one, so a rejected save says
+ * why. The templates route replies with a plain string for a business-rule
+ * rejection (e.g. a dropped placeholder) but a zod `flatten()` object for a
+ * malformed request — flatten the latter into readable text instead of
+ * swallowing it behind a generic "check the values" line.
+ */
+function serverErrorMessage(err: unknown, fallback: string): string {
+  if (!axios.isAxiosError(err)) return fallback;
+  const payload = err.response?.data?.error;
+  if (!payload) return fallback;
+  if (typeof payload === "string") return payload;
+
+  const parts: string[] = [];
+  if (Array.isArray(payload.formErrors)) parts.push(...payload.formErrors);
+  if (payload.fieldErrors && typeof payload.fieldErrors === "object") {
+    for (const [field, msgs] of Object.entries(payload.fieldErrors)) {
+      if (Array.isArray(msgs) && msgs.length > 0) parts.push(`${field}: ${msgs.join(", ")}`);
+    }
+  }
+  return parts.length > 0 ? parts.join(" · ") : fallback;
+}
+
+/**
  * Every outbound message's wording, editable from the dashboard.
  *
  * WhatsApp templates carry a hard caveat that this panel must never hide:
@@ -110,24 +133,21 @@ export default function TemplatesPanel() {
       setMessage("Templates saved. Takes effect on the next message sent — no restart needed.");
     } catch (err) {
       setPhase("error");
-      setMessage(
-        axios.isAxiosError(err) && err.response?.data?.error
-          ? typeof err.response.data.error === "string"
-            ? err.response.data.error
-            : "Server rejected the save — check the values and try again."
-          : "Could not reach the API server. Nothing was saved.",
-      );
+      setMessage(serverErrorMessage(err, "Could not reach the API server. Nothing was saved."));
     }
   };
 
   const doReset = async (key: string) => {
+    setMessage(null);
     try {
       const saved = await resetTemplate(key);
       setTemplates(saved);
       setDrafts(Object.fromEntries(saved.map((t) => [t.key, t.value])));
-    } catch {
-      setMessage("Could not reset this template. Confirm the API server is running.");
+      setFieldErrors({});
+      setPhase("idle");
+    } catch (err) {
       setPhase("error");
+      setMessage(serverErrorMessage(err, "Could not reset this template. Confirm the API server is running."));
     }
   };
 
@@ -194,14 +214,14 @@ export default function TemplatesPanel() {
         </div>
       </div>
 
-      <div className="settings-actions">
+      <div className="form-actions">
         <button
           type="button"
-          className={`trigger-button settings-save${phase === "saved" && dirtyKeys.length === 0 ? " settings-save--ok" : ""}`}
+          className={`trigger-button form-save${phase === "saved" && dirtyKeys.length === 0 ? " form-save--ok" : ""}`}
           onClick={save}
           disabled={phase === "saving" || dirtyKeys.length === 0}
         >
-          {phase === "saving" && <span className="settings-spinner" aria-hidden="true" />}
+          {phase === "saving" && <span className="form-spinner" aria-hidden="true" />}
           {phase === "saved" && dirtyKeys.length === 0 && <span aria-hidden="true">✓ </span>}
           {phase === "saving"
             ? "Saving…"
@@ -212,7 +232,7 @@ export default function TemplatesPanel() {
                 : "Save changes"}
         </button>
         {message && (
-          <span className={`settings-feedback settings-feedback--${phase === "error" ? "error" : "ok"}`} role="status">
+          <span className={`form-feedback form-feedback--${phase === "error" ? "error" : "ok"}`} role="status">
             {message}
           </span>
         )}

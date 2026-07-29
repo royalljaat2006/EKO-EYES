@@ -8,6 +8,7 @@ import type {
   DailySummary,
   DeliverySummary,
   EffectiveTemplate,
+  EmailDraft,
   GeoBreakdown,
   InactivityQueryResult,
   InactivityRecord,
@@ -136,6 +137,12 @@ export async function resetTemplate(key: string): Promise<EffectiveTemplate[]> {
 export async function fetchMessageReach(): Promise<MessageReach> {
   const { data } = await client.get<MessageReach>("/message-reach");
   return data;
+}
+
+/** Emails composed while emailDraftOnly was on — never sent, most recent first. */
+export async function fetchEmailDrafts(): Promise<EmailDraft[]> {
+  const { data } = await client.get<{ drafts: EmailDraft[] }>("/email-drafts");
+  return data.drafts;
 }
 
 /**

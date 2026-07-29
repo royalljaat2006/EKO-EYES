@@ -67,6 +67,7 @@ type Draft = Omit<AppSettings, NumericField> & Record<NumericField, string>;
 function toDraft(s: AppSettings): Draft {
   return {
     emailEnabled: s.emailEnabled,
+    emailDraftOnly: s.emailDraftOnly,
     whatsappEnabled: s.whatsappEnabled,
     inactivityThresholdDays: String(s.inactivityThresholdDays),
     targetInactivityRate: String(s.targetInactivityRate),
@@ -154,6 +155,7 @@ export default function SettingsPanel({
     try {
       const next = await updateSettings({
         emailEnabled: draft.emailEnabled,
+        emailDraftOnly: draft.emailDraftOnly,
         whatsappEnabled: draft.whatsappEnabled,
         inactivityThresholdDays: Number(draft.inactivityThresholdDays),
         targetInactivityRate: Number(draft.targetInactivityRate),
@@ -211,6 +213,14 @@ export default function SettingsPanel({
           onChange={(v) => setField("emailEnabled", v)}
           hint="Off stops every outbound email digest to RMs, DCs, managers and support."
         />
+        <ToggleCard
+          icon="🧪"
+          label="Email draft-only mode"
+          checked={draft.emailDraftOnly}
+          onChange={(v) => setField("emailDraftOnly", v)}
+          highlightWhen="on"
+          hint="On: every email is composed exactly as usual — same recipients, templates, wording — but saved as a draft below instead of sent. Nothing reaches a real inbox. Off: the next run sends for real, same plan. Only matters while Email alerts (above) is On."
+        />
 
         {NUMERIC_FIELDS.map((f) => (
           <div className="setting-card" key={f.field}>
@@ -245,14 +255,14 @@ export default function SettingsPanel({
         </p>
       )}
 
-      <div className="settings-actions">
+      <div className="form-actions">
         <button
           type="button"
-          className={`trigger-button settings-save${phase === "saved" && !dirty ? " settings-save--ok" : ""}`}
+          className={`trigger-button form-save${phase === "saved" && !dirty ? " form-save--ok" : ""}`}
           onClick={save}
           disabled={phase === "saving" || !dirty}
         >
-          {phase === "saving" && <span className="settings-spinner" aria-hidden="true" />}
+          {phase === "saving" && <span className="form-spinner" aria-hidden="true" />}
           {phase === "saved" && !dirty && <span aria-hidden="true">✓ </span>}
           {phase === "saving" ? "Saving…" : phase === "saved" && !dirty ? "Saved" : "Save configuration"}
         </button>
@@ -271,7 +281,7 @@ export default function SettingsPanel({
         )}
         {message && (
           <span
-            className={`settings-feedback settings-feedback--${phase === "error" ? "error" : "ok"}`}
+            className={`form-feedback form-feedback--${phase === "error" ? "error" : "ok"}`}
             role="status"
           >
             {message}
@@ -288,15 +298,26 @@ function ToggleCard({
   checked,
   onChange,
   hint,
+  /**
+   * Which state should visually stand out. "off" (default) reddens the card
+   * when OFF — right for kill switches, where off is the concerning state.
+   * "on" instead ambers the card when ON — right for a mode like draft-only,
+   * where ON is the unusual state worth noticing and OFF (normal sending) is
+   * perfectly safe.
+   */
+  highlightWhen = "off",
 }: {
   icon: string;
   label: string;
   checked: boolean;
   onChange: (v: boolean) => void;
   hint: string;
+  highlightWhen?: "on" | "off";
 }) {
+  const highlighted = highlightWhen === "off" ? !checked : checked;
+  const highlightClass = highlightWhen === "off" ? "setting-card--off" : "setting-card--active-warn";
   return (
-    <div className={`setting-card setting-card--toggle${checked ? "" : " setting-card--off"}`}>
+    <div className={`setting-card setting-card--toggle${highlighted ? ` ${highlightClass}` : ""}`}>
       <div className="setting-card__head">
         <span className="setting-card__icon" aria-hidden="true">
           {icon}

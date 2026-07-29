@@ -21,6 +21,7 @@ import {
   updateTemplates,
 } from "../services/templates.service";
 import { getMessageReach } from "../services/messageReach.service";
+import { getEmailDrafts } from "../services/emailDrafts.service";
 import { getGeoBreakdown, getRmDcPerformance } from "../services/analytics.service";
 import { getAtRiskCsps, getDailySummary, getRecommendations } from "../services/insights.service";
 import { sendOneOffNudge } from "../services/oneOffNudge.service";
@@ -266,6 +267,7 @@ router.get("/settings", (_req, res) => {
 const settingsSchema = z
   .object({
     emailEnabled: z.boolean(),
+    emailDraftOnly: z.boolean(),
     whatsappEnabled: z.boolean(),
     inactivityThresholdDays: z.number().int("Must be a whole number of days").min(1).max(365),
     targetInactivityRate: z.number().min(0).max(100),
@@ -378,6 +380,22 @@ router.get("/message-reach", (req, res) => {
     return res.json(getMessageReach(jobRunId));
   }
   return res.json(getMessageReach());
+});
+
+/**
+ * GET /api/email-drafts
+ * Emails composed while `emailDraftOnly` was on (settings.service.ts) —
+ * exactly what would have been sent, saved instead. Most recent first.
+ * Nothing here was ever attempted for real delivery, so it's not part of
+ * delivery-summary or message-reach.
+ */
+router.get("/email-drafts", (_req, res) => {
+  try {
+    return res.json({ drafts: getEmailDrafts() });
+  } catch (err) {
+    logger.error({ err }, "Failed to load email drafts");
+    return res.status(500).json({ error: "Failed to load email drafts" });
+  }
 });
 
 /**

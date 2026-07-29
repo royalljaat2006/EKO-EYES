@@ -1107,6 +1107,37 @@
   color: var(--critical);
 }
 
+/* --- Email draft preview (expanded row in Email drafts panel) --- */
+
+.email-draft-preview {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.email-draft-preview__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.email-draft-preview__body {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--row-stripe);
+  border: 1px dashed var(--border);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* --- Manual trigger button + confirmation modal --- */
 
 .top-actions {
@@ -2779,6 +2810,12 @@
   background: var(--critical-wash);
 }
 
+/* A mode that's ON and unusual (e.g. draft-only) — worth noticing, not alarming. */
+.setting-card--active-warn {
+  border-color: var(--warning);
+  background: var(--warning-wash);
+}
+
 /* --- The on/off switch --- */
 
 .setting-toggle {
@@ -2861,7 +2898,15 @@
   line-height: 1.5;
 }
 
-.settings-actions {
+/* --- Shared "save row" for any config-editing panel ----------------------
+   Used by BOTH SettingsPanel and TemplatesPanel (and any future config
+   panel). Named `form-*` rather than `settings-*` on purpose: these rules
+   are not owned by the Settings panel, and a `settings-`-prefixed name made
+   `document.querySelector(".settings-save")` ambiguous once a second panel
+   reused it. See DESIGN_KIT.md §9 — don't overload another block's
+   namespace; give a genuinely shared pattern its own neutral name. */
+
+.form-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -2871,18 +2916,18 @@
 
 /* The primary action — accent, not the red `trigger-button--confirm`, which
    this dashboard reserves for destructive/sends-real-messages actions. */
-.settings-save {
+.form-save {
   background: var(--series-1);
   border-color: var(--series-1);
   color: #ffffff;
 }
 
-.settings-save:hover:not(:disabled) {
+.form-save:hover:not(:disabled) {
   background: var(--series-1);
   filter: brightness(1.08);
 }
 
-.settings-save--ok {
+.form-save--ok {
   background: var(--good);
   border-color: var(--good);
 }
@@ -2892,36 +2937,36 @@
   color: var(--text-secondary);
 }
 
-.settings-spinner {
+.form-spinner {
   width: 13px;
   height: 13px;
   border-radius: 50%;
   border: 2px solid rgba(255, 255, 255, 0.35);
   border-top-color: #ffffff;
-  animation: settings-spin 0.7s linear infinite;
+  animation: form-spin 0.7s linear infinite;
 }
 
-@keyframes settings-spin {
+@keyframes form-spin {
   to {
     transform: rotate(360deg);
   }
 }
 
-.settings-feedback {
+.form-feedback {
   font-size: 12.5px;
   line-height: 1.4;
-  animation: settings-feedback-in 0.25s ease;
+  animation: form-feedback-in 0.25s ease;
 }
 
-.settings-feedback--ok {
+.form-feedback--ok {
   color: var(--good);
 }
 
-.settings-feedback--error {
+.form-feedback--error {
   color: var(--critical);
 }
 
-@keyframes settings-feedback-in {
+@keyframes form-feedback-in {
   from {
     opacity: 0;
     transform: translateY(-3px);
@@ -2935,11 +2980,11 @@
 /* Respect a reduced-motion preference: the spinner still reads as "busy"
    without spinning, and the feedback simply appears. */
 @media (prefers-reduced-motion: reduce) {
-  .settings-spinner {
+  .form-spinner {
     animation-duration: 2s;
   }
 
-  .settings-feedback {
+  .form-feedback {
     animation: none;
   }
 

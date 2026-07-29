@@ -3,13 +3,14 @@ import env from "../config/env";
 import logger from "../utils/logger";
 import { InactivityRecord, NotificationChannel, NotificationOutcome, NotificationRole } from "../types";
 import { EvaluatedPerson } from "./escalation.service";
-import { sendDigestEmail } from "./email.service";
+import { buildDigestSubject, sendDigestEmail } from "./email.service";
 import { sendDigestWhatsApp } from "./whatsapp/whatsapp.service";
 import { TIERS } from "../config/escalation";
 import { NudgeDecision } from "./cspEngagement.service";
 import { isPlaceholderAssignee } from "../utils/placeholder";
 import { getBoolSetting, getNumberSetting } from "./settings.service";
 import { getTemplate, renderTemplate } from "./templates.service";
+import { saveEmailDraft } from "./emailDrafts.service";
 
 const TIER_HEADLINE_TEMPLATE_KEY: Record<string, string> = {
   self: "tierHeadlineSelf",
@@ -180,28 +181,15 @@ export function renderCspMessage(record: InactivityRecord): string {
   });
 }
 
-export function renderDigestText(target: DigestTarget, decisions: NudgeDecisions): string {
-  const lines: string[] = [
-    `Inactivity digest for you as ${target.role}.`,
-    `${target.people.length} CSP(s) need your attention.`,
-    ``,
-  ];
-
-  if (target.role === "SUPPORT") {
-    lines.push(
-      `These CSPs have an INACTIVE TERMINAL. They cannot transact, so they have`,
-      `NOT been sent reminders — this is a technical fault, not a follow-up task.`,
-      ``,
-    );
-    for (const p of target.people) {
-      lines.push(
-        `  • ${p.record.targetPersonName} (${p.record.cspCode}) — ${p.record.days} days, ` +
-          `terminal: ${p.record.terminalStatus}, RM: ${p.record.rmName || "—"}`,
-      );
-    }
-    lines.push(``, `-- E.Y.E.S. (EKO Yield & Escalation System)`);
-    return lines.join("\n");
-  }
+/**
+ * The dynamic, per-recipient breakdown: tier-grouped CSP lists, plus the
+ * "terminal not active" / "call required" call-outs. This is NEVER a
+ * template — it's built from real names/days/statuses every run, so it
+ * can't be a static string. It's what {{cspList}} gets substituted with
+ * inside the RM/DC email body templates (rmEmailBody/dcEmailBody).
+ */
+function buildCspListSection(target: DigestTarget, decisions: NudgeDecisions): string {
+  const lines: string[] = [];
 
   for (const policy of TIERS) {
     const group = target.people.filter((p) => p.policy.tier === policy.tier);
@@ -244,12 +232,56 @@ export function renderDigestText(target: DigestTarget, decisions: NudgeDecisions
     lines.push(``);
   }
 
-  lines.push(
-    `Target: keep inactivity at or below ${getNumberSetting("targetInactivityRate")}%.`,
-    ``,
-    `-- E.Y.E.S. (EKO Yield & Escalation System)`,
-  );
-  return lines.join("\n");
+  return lines.join("\n").trimEnd();
+}
+
+/** Which template key owns the whole email body, per role. RM and DC each have their own — see templates.service.ts. */
+const ROLE_EMAIL_BODY_TEMPLATE_KEY: Partial<Record<NotificationRole, string>> = {
+  RM: "rmEmailBody",
+  DC: "dcEmailBody",
+};
+
+export function renderDigestText(target: DigestTarget, decisions: NudgeDecisions): string {
+  if (target.role === "SUPPORT") {
+    const lines: string[] = [
+      `Inactivity digest for you as ${target.role}.`,
+      `${target.people.length} CSP(s) need your attention.`,
+      ``,
+      `These CSPs have an INACTIVE TERMINAL. They cannot transact, so they have`,
+      `NOT been sent reminders — this is a technical fault, not a follow-up task.`,
+      ``,
+    ];
+    for (const p of target.people) {
+      lines.push(
+        `  • ${p.record.targetPersonName} (${p.record.cspCode}) — ${p.record.days} days, ` +
+          `terminal: ${p.record.terminalStatus}, RM: ${p.record.rmName || "—"}`,
+      );
+    }
+    lines.push(``, `-- E.Y.E.S. (EKO Yield & Escalation System)`);
+    return lines.join("\n");
+  }
+
+  const cspList = buildCspListSection(target, decisions);
+  const bodyKey = ROLE_EMAIL_BODY_TEMPLATE_KEY[target.role];
+
+  // MANAGER/LEADERSHIP have no tier that actually routes to them (see
+  // escalation.ts — only CSP/RM/DC are ever in a tier's `roles`), so this is
+  // a safety net for a role with no dedicated template, not a live path.
+  if (!bodyKey) {
+    return (
+      `Inactivity digest for you as ${target.role}.\n` +
+      `${target.people.length} CSP(s) need your attention.\n\n` +
+      `${cspList}\n\n` +
+      `Target: keep inactivity at or below ${getNumberSetting("targetInactivityRate")}%.\n\n` +
+      `-- E.Y.E.S. (EKO Yield & Escalation System)`
+    );
+  }
+
+  return renderTemplate(getTemplate(bodyKey), {
+    count: target.people.length,
+    targetRate: getNumberSetting("targetInactivityRate"),
+    cspList,
+  });
 }
 
 /**
@@ -285,11 +317,21 @@ export function buildWhatsAppMessages(
   }));
 }
 
+/**
+ * Channels are now per ROLE, not per tier — an RM and a DC covered by the
+ * same tier can be on different channels (e.g. escalated: RM gets
+ * whatsapp+email, DC gets whatsapp only). Unions each covered person's
+ * `channelsByRole[target.role]`, so an RM/DC responsible for CSPs at
+ * different tiers gets the widest channel set any of them earns them.
+ */
 function channelsFor(target: DigestTarget): NotificationChannel[] {
   if (target.role === "CSP") return ["whatsapp"]; // no CSP email exists in the sheet
   if (target.role === "SUPPORT") return ["email"];
   const set = new Set<NotificationChannel>();
-  for (const p of target.people) p.policy.channels.forEach((c) => set.add(c));
+  for (const p of target.people) {
+    const channels = p.policy.channelsByRole[target.role] ?? [];
+    channels.forEach((c) => set.add(c));
+  }
   return Array.from(set);
 }
 
@@ -306,11 +348,17 @@ export async function sendDigests(
   // because "we chose not to send" is not a delivery problem and shouldn't
   // show up red in the delivery dashboard.
   const emailEnabled = getBoolSetting("emailEnabled");
+  const emailDraftOnly = getBoolSetting("emailDraftOnly");
   const whatsappEnabled = getBoolSetting("whatsappEnabled");
   if (!emailEnabled) {
     logger.warn(
       { targets: targets.length },
       "Email dispatch SKIPPED — email alerts are disabled in dashboard settings",
+    );
+  } else if (emailDraftOnly) {
+    logger.warn(
+      { targets: targets.length },
+      "Email dispatch in DRAFT-ONLY mode — composing every email as usual, saving instead of sending",
     );
   }
   if (!whatsappEnabled) {
@@ -331,37 +379,58 @@ export async function sendDigests(
     const mobileTo = target.mobile;
 
     if (emailEnabled && channels.includes("email") && emailTo) {
-      const emailMessageId = crypto.randomUUID();
-      try {
-        await sendDigestEmail(emailTo, target.role, renderDigestText(target, decisions), emailMessageId);
-        names.forEach((n) =>
-          outcomes.push({
-            channel: "email",
-            role: target.role,
-            recipient: emailTo,
-            recipientName: target.name,
-            ...n,
-            success: true,
-            messageId: emailMessageId,
-            deliveryStatus: "sent",
-          }),
-        );
-      } catch (err) {
-        const error = err instanceof Error ? err.message : String(err);
-        logger.error({ err, role: target.role }, "Digest email failed");
-        names.forEach((n) =>
-          outcomes.push({
-            channel: "email",
-            role: target.role,
-            recipient: emailTo,
-            recipientName: target.name,
-            ...n,
-            success: false,
-            error,
-            messageId: emailMessageId,
-            deliveryStatus: "failed",
-          }),
-        );
+      // Same rendering either way — draft-only changes only the LAST step
+      // (save vs. actually send), never what gets composed. Flip the
+      // setting back off and the next run sends this exact plan for real.
+      const body = renderDigestText(target, decisions);
+
+      if (emailDraftOnly) {
+        saveEmailDraft({
+          jobRunId: null,
+          role: target.role,
+          recipient: emailTo,
+          recipientName: target.name,
+          subject: buildDigestSubject(target.role),
+          body,
+          cspCount: target.people.length,
+          now: new Date().toISOString(),
+        });
+        logger.info({ role: target.role, recipient: emailTo }, "Email drafted (not sent) — emailDraftOnly is on");
+        // Deliberately no outcome pushed: a draft was never attempted for
+        // real delivery, so it must not count toward sent/failed/reach.
+      } else {
+        const emailMessageId = crypto.randomUUID();
+        try {
+          await sendDigestEmail(emailTo, target.role, body, emailMessageId);
+          names.forEach((n) =>
+            outcomes.push({
+              channel: "email",
+              role: target.role,
+              recipient: emailTo,
+              recipientName: target.name,
+              ...n,
+              success: true,
+              messageId: emailMessageId,
+              deliveryStatus: "sent",
+            }),
+          );
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          logger.error({ err, role: target.role }, "Digest email failed");
+          names.forEach((n) =>
+            outcomes.push({
+              channel: "email",
+              role: target.role,
+              recipient: emailTo,
+              recipientName: target.name,
+              ...n,
+              success: false,
+              error,
+              messageId: emailMessageId,
+              deliveryStatus: "failed",
+            }),
+          );
+        }
       }
     }
 

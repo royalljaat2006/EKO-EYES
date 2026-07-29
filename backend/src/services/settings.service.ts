@@ -29,6 +29,15 @@ db.exec(`
 export interface AppSettings {
   /** Master switch for ALL outbound email. Off = the daily job sends none. */
   emailEnabled: boolean;
+  /**
+   * When true (and emailEnabled is true), the daily job composes every email
+   * exactly as it normally would — same recipient, subject, body, same
+   * templates — but SAVES it as a reviewable draft instead of sending it.
+   * Nothing goes to a real inbox. Toggle back to false and the very next run
+   * sends for real, using the same plan/templates/logic — this is a
+   * send/don't-send switch on the last step only, not a different pipeline.
+   */
+  emailDraftOnly: boolean;
   /** Master switch for ALL outbound WhatsApp, including manual one-off nudges. */
   whatsappEnabled: boolean;
   /** Days of inactivity past which a CSP counts toward the inactivity rate. */
@@ -44,6 +53,7 @@ export interface AppSettings {
 /** DB key <-> field name. The DB uses snake_case so the rows read like config. */
 const KEYS = {
   emailEnabled: "email_enabled",
+  emailDraftOnly: "email_draft_only",
   whatsappEnabled: "whatsapp_enabled",
   inactivityThresholdDays: "inactivity_threshold_days",
   targetInactivityRate: "target_inactivity_rate",
@@ -57,6 +67,7 @@ export function settingDefaults(): AppSettings {
     // Nothing in .env disables a channel today, so delivery stays on until an
     // operator deliberately turns it off here.
     emailEnabled: true,
+    emailDraftOnly: false,
     whatsappEnabled: true,
     inactivityThresholdDays: env.INACTIVITY_THRESHOLD_DAYS,
     targetInactivityRate: env.TARGET_INACTIVITY_RATE,
@@ -80,7 +91,7 @@ function writeRaw(key: string, value: string, now: string): void {
 }
 
 /** A stored value that isn't a recognisable boolean is treated as unset — never as `false`, which would silence a channel by accident. */
-export function getBoolSetting(field: "emailEnabled" | "whatsappEnabled"): boolean {
+export function getBoolSetting(field: "emailEnabled" | "emailDraftOnly" | "whatsappEnabled"): boolean {
   const raw = readRaw(KEYS[field]);
   if (raw === "true" || raw === "1") return true;
   if (raw === "false" || raw === "0") return false;
@@ -100,6 +111,7 @@ export function getNumberSetting(
 export function getSettings(): AppSettings {
   return {
     emailEnabled: getBoolSetting("emailEnabled"),
+    emailDraftOnly: getBoolSetting("emailDraftOnly"),
     whatsappEnabled: getBoolSetting("whatsappEnabled"),
     inactivityThresholdDays: getNumberSetting("inactivityThresholdDays"),
     targetInactivityRate: getNumberSetting("targetInactivityRate"),

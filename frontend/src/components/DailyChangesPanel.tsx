@@ -7,12 +7,12 @@ import Pager from "./Pager";
 
 const PAGE_SIZE = 10;
 
-/** "self" -> "3–7d", "breach" -> "8–15d", etc. — matches the tier-strip's own ranges, no tier names. */
+/** "self" -> "3–6d", "breach" -> "7–14d", etc. — matches the tier-strip's own ranges, no tier names. */
 const TIER_LABELS: Record<string, string> = {
-  self: "3–7d",
-  breach: "8–15d",
-  escalated: "16–23d",
-  critical: "24+d",
+  self: "3–6d",
+  breach: "7–14d",
+  escalated: "15–29d",
+  critical: "30+d",
 };
 
 function tierLabel(tier: string | null): string {

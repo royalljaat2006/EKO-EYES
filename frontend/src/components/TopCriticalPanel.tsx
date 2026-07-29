@@ -12,7 +12,7 @@ interface Props {
   records: InactivityRecord[];
 }
 
-/** The home dashboard's critical-tier widget — every CSP in the critical tier (24+ days), worst first. */
+/** The home dashboard's critical-tier widget — every CSP in the critical tier (30+ days), worst first. */
 export default function TopCriticalPanel({ records }: Props) {
   const { page, pageCount, visible, setPage } = usePagination(records, PAGE_SIZE);
 

@@ -113,6 +113,11 @@ export async function sendAlertEmail(
   logger.info({ recipient, role, person: record.targetPersonName }, "Alert email sent");
 }
 
+/** The digest email subject line — its own function so the draft-only preview path (digest.service.ts) can show EXACTLY what a real send would use, not a re-derived approximation. */
+export function buildDigestSubject(role: NotificationRole): string {
+  return renderTemplate(getTemplate("emailDigestSubject"), { role });
+}
+
 /** One consolidated digest to a single recipient, covering all their people. */
 export async function sendDigestEmail(
   recipient: string,
@@ -132,7 +137,7 @@ export async function sendDigestEmail(
   const mailOptions: nodemailer.SendMailOptions = {
     from: env.ALERT_EMAIL_FROM,
     to: recipient,
-    subject: renderTemplate(getTemplate("emailDigestSubject"), { role }),
+    subject: buildDigestSubject(role),
     text: body,
     html: htmlBody,
   };
