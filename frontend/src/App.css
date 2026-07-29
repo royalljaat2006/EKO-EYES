@@ -889,6 +889,16 @@
   color: var(--text-secondary);
 }
 
+/* The "today" sub-line under each Progress-to-target stat — same visual
+   weight as __label but distinct in color so "the total" and "today's
+   real, un-fabricated count" read as two different things at a glance. */
+.delivery-stat__today {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--series-1);
+  margin-top: 2px;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;

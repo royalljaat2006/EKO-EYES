@@ -13,7 +13,7 @@ import {
 } from "recharts";
 import type { TooltipContentProps } from "recharts";
 import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
-import type { KpiReport } from "../types";
+import type { DailyChanges, KpiReport } from "../types";
 import { RANGE_OPTIONS, RANGE_LABELS } from "../rangeOptions";
 import type { RangeOption, RangeFilter } from "../rangeOptions";
 import type { Tier } from "../tierOptions";
@@ -38,6 +38,8 @@ interface Props {
   hasSecondaryFilter: boolean;
   /** Today's live count for the current combined filter — always accurate even when history isn't available. */
   liveToday: { day: string; count: number };
+  /** Today's named onset/recovery audit trail — same source DailyChangesPanel shows. Null until it's loaded. */
+  dailyChanges: DailyChanges | null;
   onRangeChipClick: (opt: RangeOption) => void;
   onTierChipClick: (tier: Tier) => void;
   onFilteredCardClick: () => void;
@@ -168,11 +170,28 @@ export default function KpiPanel({
   filterLabel,
   hasSecondaryFilter,
   liveToday,
+  dailyChanges,
   onRangeChipClick,
   onTierChipClick,
   onFilteredCardClick,
 }: Props) {
   const gap = Number((currentRate - kpi.targetRate).toFixed(2));
+
+  // Today's real counts, from the same named audit trail Daily Changes shows
+  // — never a fabricated or estimated number. Whole-roster only (the
+  // daily-diff log has no per-LHO/RM/DC/search breakdown — see the
+  // dailyChangeData comment below), so these are hidden when a secondary
+  // filter is active rather than implying they're scoped to it.
+  const newlyInactiveToday = !hasSecondaryFilter ? (dailyChanges?.newlyInactive.length ?? 0) : null;
+  const recoveredToday = !hasSecondaryFilter ? (dailyChanges?.recovered.length ?? 0) : null;
+  // Mirrors the backend's own 30-day recoveryRate formula (recoveries / (recoveries + currentInactive)),
+  // just with today's recovered count as the numerator instead of the 30-day one — same shape, tighter window.
+  const todayRecoveryRate =
+    recoveredToday === null
+      ? null
+      : recoveredToday + kpi.currentInactive === 0
+        ? null
+        : Number(((recoveredToday / (recoveredToday + kpi.currentInactive)) * 100).toFixed(1));
 
   // The graph's own filter — separate from the page-level range/LHO/RM/DC/
   // search filters above. Purely a display choice over the same underlying
@@ -264,14 +283,25 @@ export default function KpiPanel({
             <span className="delivery-stat__label">
               {range === "90+" ? "Ignored" : "Inactive"} &mdash; {filterLabel} (click to view)
             </span>
+            {newlyInactiveToday !== null && (
+              <span className="delivery-stat__today">+{newlyInactiveToday} new today</span>
+            )}
           </button>
           <div className="delivery-stat">
             <span className="delivery-stat__value delivery-stat__value--good">{kpi.recoveries}</span>
             <span className="delivery-stat__label">Activated successfully (30d)</span>
+            {recoveredToday !== null && (
+              <span className="delivery-stat__today">+{recoveredToday} today</span>
+            )}
           </div>
           <div className="delivery-stat">
             <span className="delivery-stat__value">{kpi.recoveryRate}%</span>
-            <span className="delivery-stat__label">Recovery rate — is the alerting working?</span>
+            <span className="delivery-stat__label">Recovery rate (30d) — is the alerting working?</span>
+            {todayRecoveryRate !== null ? (
+              <span className="delivery-stat__today">Today: {todayRecoveryRate}%</span>
+            ) : (
+              recoveredToday !== null && <span className="delivery-stat__today">Today: —</span>
+            )}
           </div>
         </div>
       </div>

@@ -95,28 +95,49 @@ export function saveDailySnapshot(day: string, records: InactivityRecord[]): voi
   write(records);
 }
 
-/** The most recent snapshot STRICTLY BEFORE `day`, keyed by csp_code. Empty map when no earlier snapshot exists yet. */
-export function loadPreviousSnapshot(day: string): Map<string, SnapshotEntry> {
+/**
+ * The baseline day to diff `day` against — the most recent snapshot that
+ * exists ON OR BEFORE `day`.
+ *
+ * Deliberately NOT "strictly before `day`" (that was the bug): the daily job
+ * is meant to run once a day, but an operator can also trigger it manually,
+ * and it did — 5 times on 2026-07-29 alone. Each run diffed against
+ * YESTERDAY's snapshot regardless of runs earlier that same day, so every
+ * re-run re-detected the same onsets/recoveries as brand new:
+ *   - the same CSP got onset-logged 5 times for one real transition
+ *   - recoveries got logged twice, the second time with a NULL tier —
+ *     because the FIRST run had already reset person_state.tier to NULL
+ *     (recordRecovery reads person_state, not the snapshot), so the
+ *     re-detected "recovery" on run 2 had nothing left to read.
+ *
+ * Preferring TODAY's own snapshot (if an earlier run already wrote one)
+ * makes the baseline "whatever the last run observed" — today if we've
+ * already run today, yesterday only on the actual first run of the day.
+ * Since `saveDailySnapshot` runs LAST in the job (after this diff), at
+ * diff-time "today's row" is always the previous run's data, never this
+ * run's — so this can't compare a run against itself.
+ */
+export function previousSnapshotDay(day: string): string | null {
+  const sameDay = db.prepare(`SELECT 1 FROM daily_roster_snapshot WHERE day = ? LIMIT 1`).get(day);
+  if (sameDay) return day;
   const prior = db
     .prepare(`SELECT day FROM daily_roster_snapshot WHERE day < ? ORDER BY day DESC LIMIT 1`)
     .get(day) as { day: string } | undefined;
-  if (!prior) return new Map();
+  return prior?.day ?? null;
+}
+
+/** The snapshot for `previousSnapshotDay(day)`, keyed by csp_code. Empty map when no earlier snapshot exists yet. */
+export function loadPreviousSnapshot(day: string): Map<string, SnapshotEntry> {
+  const priorDay = previousSnapshotDay(day);
+  if (!priorDay) return new Map();
 
   const rows = db
     .prepare(
       `SELECT csp_code, person_name, days, tier FROM daily_roster_snapshot WHERE day = ?`,
     )
-    .all(prior.day) as SnapshotRow[];
+    .all(priorDay) as SnapshotRow[];
 
   return new Map(rows.map((r) => [r.csp_code, toEntry(r)]));
-}
-
-/** Which day `loadPreviousSnapshot` would read — surfaced so the job can log what it actually compared against. */
-export function previousSnapshotDay(day: string): string | null {
-  const prior = db
-    .prepare(`SELECT day FROM daily_roster_snapshot WHERE day < ? ORDER BY day DESC LIMIT 1`)
-    .get(day) as { day: string } | undefined;
-  return prior?.day ?? null;
 }
 
 export function snapshotDayCount(): number {

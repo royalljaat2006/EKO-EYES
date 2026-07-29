@@ -770,6 +770,7 @@ export default function App() {
                           filterLabel={filterLabel}
                           hasSecondaryFilter={hasSecondaryFilter}
                           liveToday={liveToday}
+                          dailyChanges={dailyChanges}
                           onRangeChipClick={setRange}
                           onTierChipClick={showTierDetail}
                           onFilteredCardClick={showFilteredDetail}

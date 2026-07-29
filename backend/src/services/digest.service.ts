@@ -26,6 +26,15 @@ export interface DigestTarget {
   email: string;
   mobile: string;
   people: EvaluatedPerson[];
+  /**
+   * This RM's CSPs with "No transaction data" — unmeasurable, so they never
+   * enter a tier and never appear in `people`. Attached ONLY to an RM who is
+   * already getting a digest for real tiered CSPs (never creates a new send
+   * on its own) — an RM responsible for a portfolio should still know about
+   * a CSP whose activity can't even be measured. Populated in buildDigests();
+   * always empty for every role except RM.
+   */
+  unmeasurableCsps?: InactivityRecord[];
 }
 
 /** What the guardrails decided for each CSP, keyed by CSP code. */
@@ -57,10 +66,16 @@ export const needsCall = (d: NudgeDecisions, people: EvaluatedPerson[]) =>
  *
  * The CSP is only included when the guardrails say so — see cspEngagement.service.
  * Everyone else (RM, DC, manager, leadership) gets a consolidated digest.
+ *
+ * `allRecords` (the FULL, untiered roster) is used only to find each
+ * already-targeted RM's "No transaction data" CSPs — see
+ * DigestTarget.unmeasurableCsps. Nobody else reads it; every real
+ * notification decision still comes from `people` (the tiered/due set).
  */
 export function buildDigests(
   people: EvaluatedPerson[],
   decisions: NudgeDecisions,
+  allRecords: InactivityRecord[] = [],
 ): DigestTarget[] {
   const byKey = new Map<string, DigestTarget>();
 
@@ -122,8 +137,22 @@ export function buildDigests(
     supportEmails.forEach((e, i) => add("SUPPORT", "Support", e, supportMobiles[i] ?? "", p));
   }
 
+  // Attach "No transaction data" CSPs to their RM's digest — but ONLY an RM
+  // who already has one going (see DigestTarget.unmeasurableCsps). Matched
+  // by the exact same `role|email|mobile` identity `add()` groups on above,
+  // so this can never accidentally merge two different RMs who happen to
+  // share a display name.
+  for (const r of allRecords) {
+    if (r.days !== null) continue; // only unmeasurable rows
+    if (!r.rm || isPlaceholderAssignee(r.rmName)) continue; // no resolved contact, or intentionally unassigned
+    const target = byKey.get(`RM|${r.rm.email}|${r.rm.mobile}`);
+    if (!target) continue; // this RM has no real tiered CSP today — don't create a send just for this
+    (target.unmeasurableCsps ??= []).push(r);
+  }
+
   for (const t of byKey.values()) {
     t.people.sort((a, b) => (b.record.days ?? 0) - (a.record.days ?? 0));
+    t.unmeasurableCsps?.sort((a, b) => a.targetPersonName.localeCompare(b.targetPersonName));
   }
   return Array.from(byKey.values());
 }
@@ -201,6 +230,17 @@ function buildCspListSection(target: DigestTarget, decisions: NudgeDecisions): s
       lines.push(
         `  • ${p.record.targetPersonName} (${p.record.cspCode}) — ${p.record.days} days inactive`,
       );
+    }
+    lines.push(``);
+  }
+
+  // Unmeasurable CSPs under this same RM — see DigestTarget.unmeasurableCsps.
+  // Never tiered, never part of `target.people`, so this is its own section
+  // rather than another row in the tier loop above.
+  if (target.unmeasurableCsps && target.unmeasurableCsps.length > 0) {
+    lines.push(`❓ NO TRANSACTION DATA — inactivity cannot be measured for these CSPs:`);
+    for (const r of target.unmeasurableCsps) {
+      lines.push(`  • ${r.targetPersonName} (${r.cspCode}) — no transaction data on file`);
     }
     lines.push(``);
   }

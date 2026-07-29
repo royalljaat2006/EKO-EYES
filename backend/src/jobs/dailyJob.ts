@@ -192,7 +192,7 @@ export async function runDailyInactivityJob(): Promise<DailyJobResult> {
 
     // 4. One digest per recipient, not one message per person. Anyone whose RM/DC
     //    has no contact on file is recorded as an explicit failure, not dropped.
-    const digests = buildDigests(dueToday, decisions);
+    const digests = buildDigests(dueToday, decisions, records);
     const unreachable = findUnreachable(dueToday);
     const notifications = [...(await sendDigests(digests, decisions)), ...unreachable];
 

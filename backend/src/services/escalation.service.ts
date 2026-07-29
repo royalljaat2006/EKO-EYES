@@ -1,3 +1,4 @@
+import env from "../config/env";
 import { Tier, TierPolicy, isEscalation, tierForDays } from "../config/escalation";
 import { InactivityRecord } from "../types";
 import { PersonState } from "./stateStore.service";
@@ -13,9 +14,45 @@ export interface EvaluatedPerson {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** "YYYY-MM-DD" for `date` in the business's configured timezone (env.TIMEZONE) — not raw UTC, not the server's local zone. */
+function calendarDateKey(date: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: env.TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function toUtcMidnight(dateKey: string): number {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  return Date.UTC(y, m - 1, d);
+}
+
+/**
+ * Whole CALENDAR DAYS elapsed since `iso`, in the configured timezone —
+ * deliberately NOT a raw millisecond-based day count.
+ *
+ * The daily job fires at a fixed wall-clock time each day, but the exact
+ * moment it reaches `now = new Date()` still varies run to run by a few
+ * hundred milliseconds (system load, event loop timing). A millisecond
+ * floor comparison is fragile to exactly that jitter: two runs "a day
+ * apart" are almost never EXACTLY 24h*N apart, so `floor(msDiff / DAY_MS)`
+ * can land on 0.999996 days and round DOWN to 0 — silently skipping a
+ * day's resend, unpredictably, depending on whether today's run happened
+ * to start a few hundred ms earlier than yesterday's. This bit a real
+ * critical-tier CSP: last_notified_at and the next run were 86,399,684ms
+ * apart — 316ms short of 24h — so a resend due "today" was suppressed.
+ *
+ * Comparing calendar dates instead means "yesterday to today" is always
+ * exactly 1, regardless of what time within each day the job ran.
+ */
 function daysSince(iso: string | null, now: Date): number {
   if (!iso) return Number.POSITIVE_INFINITY;
-  return Math.floor((now.getTime() - new Date(iso).getTime()) / DAY_MS);
+  const lastKey = calendarDateKey(new Date(iso));
+  const nowKey = calendarDateKey(now);
+  if (lastKey === nowKey) return 0;
+  return Math.round((toUtcMidnight(nowKey) - toUtcMidnight(lastKey)) / DAY_MS);
 }
 
 /**
