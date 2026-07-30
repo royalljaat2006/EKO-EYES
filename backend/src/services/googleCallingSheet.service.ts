@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { google } from "googleapis";
 import env from "../config/env";
+import logger from "../utils/logger";
 import { InactivityRecord } from "../types";
 import { CellValue, SHEET_NAME, recordsFromGrid } from "./callingSheet.parser";
 
@@ -12,6 +13,42 @@ import { CellValue, SHEET_NAME, recordsFromGrid } from "./callingSheet.parser";
  * Requires a service account (read-only Sheets scope) with the spreadsheet
  * shared to its email as Viewer. See README "Connecting Google Sheets".
  */
+
+const MAX_ATTEMPTS = 3;
+const RETRY_DELAYS_MS = [500, 1500]; // between attempts 1->2 and 2->3
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * The production RACK server sits on a link with occasional severe latency
+ * spikes (observed: 8.8.8.8 ping averaging 500-700ms, vs. a normal <50ms) —
+ * shared-server network contention, not anything wrong with Google's side or
+ * our credentials. Under that jitter, the OAuth token fetch or the Sheets API
+ * call itself intermittently exceeds its timeout and throws, even though a
+ * request a few seconds earlier or later succeeds fine. Retrying with a short
+ * backoff absorbs exactly that kind of transient failure instead of surfacing
+ * "data not loading" to the dashboard for a blip that would have cleared on
+ * its own.
+ */
+async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const isLastAttempt = attempt === MAX_ATTEMPTS;
+      logger.warn(
+        { err, attempt, maxAttempts: MAX_ATTEMPTS },
+        `${label} failed${isLastAttempt ? " — giving up" : " — retrying"}`,
+      );
+      if (!isLastAttempt) await sleep(RETRY_DELAYS_MS[attempt - 1]);
+    }
+  }
+  throw lastErr;
+}
 
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"];
 
@@ -45,13 +82,15 @@ export async function fetchFromGoogleCallingSheet(force = false): Promise<Inacti
   if (!force && cached && now - cachedAt < ttl) return cached;
 
   const sheets = getSheetsClient();
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: env.GOOGLE_SHEETS_SPREADSHEET_ID,
-    range: RANGE,
-    // UNFORMATTED gives real numbers (mobiles, date serials); the parser copes.
-    valueRenderOption: "UNFORMATTED_VALUE",
-    dateTimeRenderOption: "SERIAL_NUMBER",
-  });
+  const res = await withRetry("Google Sheets fetch", () =>
+    sheets.spreadsheets.values.get({
+      spreadsheetId: env.GOOGLE_SHEETS_SPREADSHEET_ID,
+      range: RANGE,
+      // UNFORMATTED gives real numbers (mobiles, date serials); the parser copes.
+      valueRenderOption: "UNFORMATTED_VALUE",
+      dateTimeRenderOption: "SERIAL_NUMBER",
+    }),
+  );
 
   const grid = (res.data.values ?? []) as CellValue[][];
   const records = await recordsFromGrid(grid, `google:${env.GOOGLE_SHEETS_SPREADSHEET_ID}`);
