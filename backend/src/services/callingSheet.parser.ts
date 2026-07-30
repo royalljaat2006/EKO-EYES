@@ -58,7 +58,15 @@ const REQUIRED: Field[] = ["cspCode", "cspName", "inactivityDays"];
 const MATCHERS: Record<Field, (h: string) => boolean> = {
   cspCode: (h) => h === "csp code",
   cspName: (h) => h === "csp name",
-  cspMobile: (h) => h === "mobile number", // exact — avoids "mobile number dc"
+  // Exact match, not startsWith — must NOT catch "mobile number dc". The Excel
+  // export used a plain "Mobile Number" header; the live Google Sheet renamed
+  // it to "CSP Mobile Number" during the source migration but the matcher was
+  // never updated, so this column resolved to -1 for every row and every CSP's
+  // mobile silently read as empty (blocking 100% of CSP WhatsApp sends via the
+  // "no-mobile" guardrail in cspEngagement.service.ts, indistinguishable from
+  // the guardrail actually doing its job). Both header spellings are matched
+  // now so either source works.
+  cspMobile: (h) => h === "mobile number" || h === "csp mobile number",
   rmName: (h) => h === "relationship manager",
   rmEmail: (h) => h.startsWith("email of rm"),
   rmMobile: (h) => h.startsWith("mobile no of rm") || h.startsWith("mobile number rm"),
